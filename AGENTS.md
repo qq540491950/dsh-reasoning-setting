@@ -21,7 +21,7 @@ DSH 桌面端（Web GUI）的**纯客户端**插件：在「设置 → 模型」
 | `lib/index.js` | 宿主半边：空的 `apply`，仅作为 Loader 的接线柱 | 低，但**不许删**：删了 `dsh-client-modules` 从该条目向上找不到 `package.json`，客户端 bundle 就不再投递 |
 | `package.json` | 包清单契约（第 4 节） | 中——改错就整体不加载 |
 | `tools/verify.mjs` | 离线自检：纯 Node、零依赖，用 `node:vm` 跑**真实的** `lib/client.js`（自带会真跑 hooks、能点击重渲染的 React 替身） | 低；改它必须同步改断言，**不许为了让它变绿而放宽断言** |
-| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 8 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
+| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 9 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
 | `README.md` | 面向使用者的介绍与使用说明 | 低 |
 | `AGENTS.md` | 本文件（工程约束） | 低 |
 
@@ -90,7 +90,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | `require` 只能取平台种子模块（本插件实际只用 `react`） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 |
 | 宿主半边零 `import`、导出 `apply` | 它只当接线柱；多引入依赖就多一个失败面 | verify B1/B2 |
 | 只注册 keyed 座位，**不要**加 `priority`、不要注册 `single` 座位 | keyed 座位的唯一性约束在 `(key, priority)`，重复注册直接抛错；`single` 才会遮蔽官方 UI，本插件不需要也没有抢位 | 约定 + verify D3 |
-| 整块默认折叠（`details` **不带** `open`），只读提示 / 校验失败汇总 / 保存结果都放在折叠区**之外** | 座位拿不到"卡片是否在编辑"（官方 owner props 只有 provider/configured/keyConfigured，且折叠态也无条件 renderSlot），铺开会盖住整张卡片；折叠时藏起来的必须只有模型列表本身，否则"保存点不动"没有解释 | verify F7a / F21b / G5b |
+| 整块**只在卡片编辑态**出现：样式表里默认 `.dsh-rs-box { display: none; }`，再用 `@supports selector(:has(*))` + `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"]))` 显示 | 官方那句 renderSlot 在卡片折叠态也会渲染，而座位契约没有"卡片是否在编辑"。判据刻意只用官方 slot 锚点（渲染器说它就是可寻址面）+ "编辑器必然带非 checkbox 输入"，不碰 hashed class。`@supports` 守卫保证不支持 `:has` 时是**一直可见**而不是一直不可见 | verify H8b–H8f / M8 / M9 |
 | 文案硬编码中文、**不注册 locale 命名空间** | 有意少一个失败面 | 约定 |
 | 视觉只用 `--dsw-alias-*` token，不裸写颜色（`var()` 兜底值可以） | 亮暗主题都要成立 | 人工 + 人工复核 |
 
@@ -128,7 +128,7 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
    node tools/mutation-check.mjs
    ```
 
-   必须看到 8 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
+   必须看到 9 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
    "看起来没问题"替代实际输出。
 5. 只有第 3、4 步都过了才有资格说"改好了"。
 6. 提交（第 7 节）。
@@ -192,12 +192,16 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   - 除新增的两条 `insert:` 行（本插件那条，以及用户自己接的 `dsh-skill-manager`）外，整份文档与备份深度相等
     ——没有把 schema 默认值物化进配置（这正是"数据源只用 user/base"守住的）；
   - 路由默认档位 `max` 在声明集合里，所以不会撞 `UNSUPPORTED_REASONING_EFFORT`。
-- 离线自检 118/118 + 8 项反向验证（M1–M8）全部命中。
+- 离线自检 120/120 + 9 项反向验证（M1–M9）全部命中。
 
 还没验证（改这块之前请先补上）：
 
-- **默认折叠后的新形态还没在真机看过**（实测反馈：铺开的版本太占卡片，所以改成一行摘要 + `<details>`；
-  折叠/展开、选中姿态的填充底色、亮暗主题对比都还需要一眼真机确认）。
+- **"只在编辑态出现"的 CSS 判据还没在真机确认过**：机制是 `@supports selector(:has(*))` +
+  `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"]))`，
+  依据是官方 `SlotOutlet` 把占用者包在 `div[data-slot]` 里、且官方编辑器必然渲染非 checkbox 输入
+  （两条都读自官方源码，但没有在真机 DOM 上验过）。要确认的是：**卡片折叠时整块不可见、点「编辑」
+  后出现**，以及选中姿态的填充底色在亮/暗主题下都看得清。若发现"一直不可见"，优先看 `:has()` 是否
+  命中（`@supports` 守卫保证那时应退化为一直可见）。
 - **只读 profile / `settings/conflict` 的真实触发路径没在真机演练过**（离线用假 ctx 覆盖）。
 - **官方 `dsh-client-ui-settings-models` 升级后**：座位名、owner props（`provider.settingsNs` /
   `settingsPath` / `declared`）与 `remote.settings` 契约都要重新对照第 3 节的不变量。

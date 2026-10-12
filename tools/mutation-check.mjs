@@ -59,10 +59,16 @@ const mutations = [
 		expect: 'F20',
 	},
 	{
-		name: 'M8 整块默认展开（卡片折叠态也会铺开一大片）',
-		from: '{ className: "dsh-rs-fold", key: "fold" },',
-		to: '{ className: "dsh-rs-fold", key: "fold", open: true },',
-		expect: 'F7a',
+		name: 'M8 不再默认隐藏（折叠态也会把面板铺出来）',
+		from: '.dsh-rs-box { display: none; }',
+		to: '.dsh-rs-box { display: flex; }',
+		expect: 'H8c',
+	},
+	{
+		name: 'M9 可见性判据丢掉官方 slot 锚点',
+		from: ':has(> [data-slot="settings.models.provider-card"])',
+		to: ':has(> .dsh-rs-box)',
+		expect: 'H8d',
 	},
 ]
 
