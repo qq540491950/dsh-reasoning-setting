@@ -148,6 +148,30 @@ const mutations = [
 		to: 'setNote("已写入 profile 的 cordis.patch.yml（模型选择器随即生效）");',
 		expect: 'F21',
 	},
+	{
+		name: 'M23 路由默认档位改成取并集（只声明 max 的模型会把同路由其余模型全部打挂）',
+		from: 'if (rows.every((model) => effortState(model).levels.includes(level))) return level;',
+		to: 'if (rows.some((model) => effortState(model).levels.includes(level))) return level;',
+		expect: 'E43',
+	},
+	{
+		name: 'M24 路由默认档位不再跳过 off（off 当默认会让选择器显示「Off」而不是提供方默认）',
+		from: 'if (level === "off") continue;',
+		to: '',
+		expect: 'E45',
+	},
+	{
+		name: 'M25 路由默认档位不再参与「有改动」（只选它就按不了保存）',
+		from: 'const changed = modelsChanged || routeChanged;',
+		to: 'const changed = modelsChanged;',
+		expect: 'F33',
+	},
+	{
+		name: 'M26 「不设置」写成空串而不是 unset（空串会被 schema 拒绝）',
+		from: '? { op: "unset", path: routeReasoningPath }',
+		to: '? { op: "set", path: routeReasoningPath, value: "" }',
+		expect: 'F40',
+	},
 ]
 
 let bad = 0

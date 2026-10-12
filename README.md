@@ -66,6 +66,12 @@ cn:deepseek-v4.1-flash   （官方模型行）
   | 什么都不勾（或点「恢复默认」） | 删掉 `reasoningEfforts` | 保留已安装目录的能力（手写路由等于不提供档位） |
   | 勾「非推理模型」 | `reasoningEfforts: false` | 明确声明这是非推理模型 |
   | 勾若干档位 | `reasoningEfforts: { off: null, low: low, … }` | composer 的档位面板出现这些档位 |
+- **「默认档位」下拉**（每张卡片一个，写路由级 `providers.<route>.reasoning`）：它决定"切到这条
+  路由的模型时，选择器里『默认』那一格落在哪"，以及**请求没带显式档位时实际发送的值**。
+  下拉里**只列这条路由每个模型都勾过的档位**（外加「不设置」）——只要有一个模型不认这一档，
+  它那些"没显式选档位"的请求就会被适配器拒（`UNSUPPORTED_REASONING_EFFORT`）。自动推荐值 =
+  这些共同档位里最高的那个（`max` 有就用 `max`，没有依次向下；一个都没有就只留「不设置」）。
+  选「不设置」= `unset` 掉这个字段（不是写空串）。
 - 档位是官方 schema 的七个：`off / minimal / low / medium / high / xhigh / max`（升序）。
   没声明的档位也能勾——勾上就加进配置。
 - 值是**档位名**，`off` 特例写 `null`（表示"支持关闭、但不发任何推理参数"）。
@@ -73,8 +79,9 @@ cn:deepseek-v4.1-flash   （官方模型行）
 - 勾「非推理模型」时上面的档位勾选会**变灰休眠**（不丢），取消勾选即恢复原样。
 - 保存前会做两项校验：
   1. **只勾 `off`** 会被适配器拒绝（字典里必须至少有一个 `off` 之外的档位），就地拦下并说明；
-  2. 该路由的默认档位（`providers.<route>.reasoning`，本机 `cpa` 是 `max`）没在勾选里时**只提示不拦**：
-     未显式选择档位时请求会撞 `UNSUPPORTED_REASONING_EFFORT`，建议一并勾上。
+  2. 该路由的默认档位（`providers.<route>.reasoning`）没在某个模型的勾选里时**只提示不拦**：
+     未显式选择档位时请求会撞 `UNSUPPORTED_REASONING_EFFORT`，建议一并勾上（或者把默认档位
+     换成共同档位——下拉里只给共同档位，就是为了不让这种情况发生）。
 - 「恢复默认」只在**该模型确实声明过**时出现（免得给每个模型都挂一个没用的链接）。
 
 ## 交互
@@ -88,12 +95,15 @@ cn:deepseek-v4.1-flash   （官方模型行）
 | 行内「保存到配置」 | 有未保存勾选时出现在勾选框下面；一次 `settings.mutate` 把整段 `models` 数组写回 profile 配置（这张卡上所有未保存的勾选一起写），成功后就地采用返回的 revision |
 | 行内「放弃这一行」 | 只丢这一个模型的草稿，其它行的未保存改动保留 |
 | 卡片底部「保存到配置」 | 与行内那个按钮同一个动作（兜底入口；卡片折叠时只剩它） |
-| 「放弃改动」 | 丢弃全部草稿，回到已保存状态 |
+| 「默认档位」下拉 | 改路由级默认档位（`providers.<route>.reasoning`）；与勾选一起在同一次保存里写下去，`不设置` = `unset` 这个字段 |
+| 「放弃改动」 | 丢弃全部草稿（含默认档位），回到已保存状态 |
 | 读取失败 | 显示原因 + 「重试」按钮，**不退役座位条目** |
 
 写入是**显式保存**的（与官方模型编辑器同一个交互）：勾选期间不写盘，点「保存到配置」才写。
+一次保存 = **一个** `set` 承载整段 `models` 数组（与官方编辑器同一种最小写法），改过默认档位时
+再加一条兄弟路径的 op（`providers.<route>.reasoning` 的 `set` / `unset`）。
 保存成功后提示会点明：**还要在 composer 的档位面板里选一次档位**，请求才会带上它——
-勾选写的是"这个模型提供哪些档位"（能力声明），不是"用哪个档位"。
+勾选写的是"这个模型提供哪些档位"（能力声明），不是"用哪个档位"；路由默认档位才是"没显式选时发什么"。
 
 ## 它是怎么工作的
 
@@ -172,7 +182,7 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\verify.mjs --patch "C:\U
 
 纯 Node、零依赖的离线程序：用 `node:vm` 跑**真实的** `lib/client.js`，喂一个会真跑 hooks、
 能点击重渲染的 React 替身与一个会真的把 `set` op 应用进 user 层、递增 revision 的假 settings 服务，
-覆盖 9 组共 156 条断言（`--patch` 时 158 条；含"渲染 → 勾选 → 保存 → 断言 `mutate` 载荷与写回后
+覆盖 9 组共 179 条断言（`--patch` 时 181 条；含"渲染 → 勾选 → 保存 → 断言 `mutate` 载荷与写回后
 视图"的端到端链路，以及用假 DOM 断言行内挂载的结构锚点、挂/撤、观察者过滤与降级路径）。
 全部通过时打印 `全部通过 ✓` 并以 0 退出。
 
@@ -182,9 +192,10 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\verify.mjs --patch "C:\U
 node D:\project\dsh-plugins\dsh-reasoning-setting\tools\mutation-check.mjs
 ```
 
-22 条注入（写入路径、未改动行逐字节保留、座位边界、inject 清单、座位 key、数据源层级、off 的 null、
+26 条注入（写入路径、未改动行逐字节保留、座位边界、inject 清单、座位 key、数据源层级、off 的 null、
 编辑态可见性的两个要素、行内容器的插入位置、按模型 id 过滤、react-dom 缺失时的降级、行内保存入口与
-其共用判据、行内提示、放弃一行只删一行、保存成功文案）必须全部命中；全部命中才算护栏真的存在。
+其共用判据、行内提示、放弃一行只删一行、保存成功文案、路由默认档位的取交集/跳过 off/参与改动/unset）
+必须全部命中；全部命中才算护栏真的存在。
 
 ## 已知取舍
 
@@ -202,13 +213,20 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\mutation-check.mjs
   （同一份 state、同一个 `save`、同一个 `saveDisabled` 判据）。「放弃这一行」只丢一行的草稿，
   「放弃改动」丢全部。官方编辑器自己的「保存」用的是它打开时的 revision，期间我们写过配置的话
   它会被 `settings/conflict` 拒绝并提示——两边互不静默覆盖。
+- **路由默认档位只给共同档位**：`providers.<route>.reasoning` 是**整条路由**的兜底值，pi-ai 在
+  "请求没带显式档位"时用它（`resolveReasoningLevel(model, undefined ?? profile.reasoning)`），
+  遇到不认这一档的模型直接抛 `UNSUPPORTED_REASONING_EFFORT`。所以下拉里只列每个模型都勾过的档位；
+  一个共同档位都没有时只留「不设置」（宁可不设，也不把同路由其它模型打挂）。
+  这也意味着**做不到"每个模型各记一个默认档位"**——DSH 的默认选择只有一份
+  （`agent-default-model` 的 `{provider, model, reasoningEffort}`），路由默认也只有一份。
 - **只管 pi-ai 家族**（`llm-pi-ai`，即自定义 / 第三方模型路由）：`llm-deepseek` 家族的模型没有
   按模型的推理字段（那边是 provider 级 `reasoningEffort`），所以不在范围里。加一个命名空间 =
   在 `lib/client.js` 的 `NAMESPACES` 里加一项。
 - **只列出配置里声明过的模型**（profile 覆盖层，其次继承层）：目录路由（已安装 catalog、配置里没写模型）
   不渲染这块区域，避免在还没保存模型时凭空生成一份用户层数组；手写路由没有模型时给一行指引。
 - **不能按模型设默认档位**：`llm-pi-ai` 的模型字段里没有这个字段，默认档位只能是路由级
-  `providers.<route>.reasoning`（本机 `cpa` 是 `max`）。插件只对"没勾默认档位"给提示。
+  `providers.<route>.reasoning`（插件现在能改它，见上面「默认档位」）。插件只对"某个模型没勾
+  路由默认档位"给提示。
 - **不能发明新档位名**：schema 的键只能取那七个（值可以重命名分发拼写，插件会保留手写的值）。
 - **文案硬编码中文**：没有注册 locale 命名空间（有意少一个失败面）。
 - **自带 CSS 而不是复用官方 class**：官方样式是 hashed CSS module，插件拿不到，所以自己注入一份

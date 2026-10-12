@@ -236,6 +236,9 @@ const modelRows = (tree) => byClass(tree, 'dsh-rs-model')
 const saveButton = (node) => buttonWithText(node, '保存到配置') ?? { props: {} }
 /** 折叠容器（现在组件不再自己套一层，正常应为 undefined）。 */
 const foldOf = (tree) => byClass(tree, 'dsh-rs-fold')[0]
+/** 下拉/选项辅助：给「默认档位」那几个断言用。 */
+const selectValue = (node) => (node === undefined ? undefined : node.props.value)
+const optionValues = (node) => (node === undefined ? [] : (node.children ?? []).map((option) => option.props.value))
 
 //#endregion
 
@@ -466,9 +469,10 @@ async function mount({ describeResults, mutate, seatProps, subscribes = true, re
 			renderRoot()
 			await settle()
 		},
-		change: async (element) => {
+		change: async (element, value) => {
 			if (element === undefined || element === null) return
-			element.props.onChange()
+			// 下拉没有「空事件」语义：把 value 交给事件对象的 target，与真实 DOM 的 onChange 一致。
+			element.props.onChange(value === undefined ? undefined : { target: { value } })
 			renderRoot()
 			await settle()
 		},
@@ -604,6 +608,17 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	check('E36 保存判据：没有改动 → 禁用', t.saveDisabled(true, false, false, 0) === true)
 	check('E37 保存判据：有校验问题 → 禁用', t.saveDisabled(true, false, true, 1) === true)
 	check('E38 保存判据：可写 + 空闲 + 有改动 + 无问题 → 可用', t.saveDisabled(true, false, true, 0) === false)
+
+	// 路由默认档位：候选只取「每个模型都声明过的档位」里最高的那个（max 优先，没有依次向下）。
+	check('E39 空 / 非数组 → 不设置', t.routeDefaultLevel(undefined) === undefined && t.routeDefaultLevel('nope') === undefined)
+	check('E40 没有任何模型声明档位 → 不设置', t.routeDefaultLevel([{ id: 'a' }, { id: 'b' }]) === undefined)
+	checkSame('E41 全都有 max → 取 max', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { max: 'max', high: 'high' } }, { id: 'b', reasoningEfforts: { max: 'max' } }]), 'max')
+	checkSame('E42 交集里最高的那个（max/xhigh 都有 → 取 xhigh）', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { max: 'max', xhigh: 'xhigh' } }, { id: 'b', reasoningEfforts: { xhigh: 'xhigh', high: 'high' } }]), 'xhigh')
+	checkSame('E43 只有一个模型声明 → 不取（取并集会让其余模型请求被拒）', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { max: 'max' } }, { id: 'b', reasoningEfforts: { high: 'high' } }]), undefined)
+	checkSame('E44 交集只有一个 → 取那一个', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { low: 'low' } }, { id: 'b', reasoningEfforts: { low: 'low', max: 'max' } }]), 'low')
+	checkSame('E45 off 不进候选（off: null 只是"支持关闭"，当默认没有意义）', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { off: null } }, { id: 'b', reasoningEfforts: { off: null } }]), undefined)
+	checkSame('E46 非推理模型不参与候选', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: false }, { id: 'b', reasoningEfforts: { max: 'max' } }]), undefined)
+	checkSame('E47 手写 wire 拼写也算已声明', t.routeDefaultLevel([{ id: 'a', reasoningEfforts: { max: 'ultra' } }, { id: 'b', reasoningEfforts: { max: 'max' } }]), 'max')
 }
 
 //#endregion
@@ -679,6 +694,44 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	await workbench.click(buttonWithText(workbench.tree, '放弃改动'))
 	check('F27 放弃后回到已保存状态', !treeText(workbench.tree).includes('有未保存的勾选') && saveButton(workbench.tree).props.disabled === true)
 	checkSame('F28 __test 常量与代码一致', t.NAMESPACES, ['llm-pi-ai'])
+
+	// 路由默认档位：选一次就写 `providers.<route>.reasoning`；与逐模型勾选共用一次保存。
+	check('F29 渲染出「默认档位」下拉', byClass(workbench.tree, 'dsh-rs-routedefault-select').length === 1, String(byClass(workbench.tree, 'dsh-rs-routedefault-select').length))
+	// 默认夹具里只有第一个模型声明了档位，交集为空 ⇒ 只能选「不设置」，且提示说明为什么。
+	{
+		const only = byClass(workbench.tree, 'dsh-rs-routedefault-select')[0]
+		checkSame('F30 没有共同档位时只能选「不设置」', optionValues(only), [''])
+		check('F30b 并说明原因（这条路由的模型还没有共同的档位）', treeText(byClass(workbench.tree, 'dsh-rs-routedefault')[0]).includes('还没有共同的档位'))
+	}
+
+	// 两个模型都声明了 high/max ⇒ 下拉列出这两个 + 不设置，并跟随配置里的路由默认档位。
+	{
+		const shared = makeDescribeResult({
+			models: [flashModel, { id: 'cn:step-5-preview', name: 'cn:step-5-preview', contextWindow: 1000000, maxTokens: 64000, input: ['text', 'image'], reasoningEfforts: { high: 'high', max: 'max' } }],
+			reasoning: 'max',
+		})
+		const bench = await mount({ describeResults: [shared] })
+		const select = byClass(bench.tree, 'dsh-rs-routedefault-select')[0]
+		checkSame('F31 下拉只列出每个模型都勾过的档位 + 不设置', optionValues(select), ['', 'high', 'max'])
+		check('F32 下拉默认跟随配置里的路由默认档位', selectValue(select) === 'max')
+		await bench.change(select, 'high')
+		check('F33 只改路由默认档位也能保存（不动任何勾选）', saveButton(bench.tree).props.disabled === false)
+		await bench.click(buttonWithText(bench.tree, '保存到配置'))
+		const routeCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
+		checkSame('F34 路由默认档位与 models 同一次保存（两条 op）', routeCall.ops.length, 2)
+		checkSame('F35 models 仍然是整段数组的 set', routeCall.ops[0] === undefined ? undefined : routeCall.ops[0].path, ['providers', 'cpa', 'models'])
+		checkSame('F36 reasoning 写在 models 的兄弟路径上', routeCall.ops[1] === undefined ? undefined : routeCall.ops[1].path, ['providers', 'cpa', 'reasoning'])
+		check('F37 写出去的值就是选的那个档位', routeCall.ops[1] !== undefined && routeCall.ops[1].value === 'high')
+		check('F38 保存后草稿清空（按钮重新禁用）', saveButton(bench.tree).props.disabled === true)
+		// 「不设置」= unset 掉这个字段（不是写空串；写空串会被 schema 拒绝）
+		await bench.change(select, '')
+		check('F39 选「不设置」时按钮可用', saveButton(bench.tree).props.disabled === false)
+		await bench.click(buttonWithText(bench.tree, '保存到配置'))
+		const unsetCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
+		check('F40 「不设置」= unset reasoning（而不是写空串）', unsetCall.ops[1] !== undefined && unsetCall.ops[1].op === 'unset')
+		// 不是共同声明的档位不出现在下拉里：选了它会让没勾它的模型在请求时被拒。
+		check('F41 未共同声明的档位不出现在下拉里', !optionValues(select).includes('medium'))
+	}
 }
 
 //#endregion
