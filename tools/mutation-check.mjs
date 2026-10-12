@@ -88,6 +88,12 @@ const mutations = [
 		to: 'function loadReactDom() {\n\t\t\treturn require("react-dom");\n\t\t}',
 		expect: 'I0',
 	},
+	{
+		name: 'M13 行内成功过后兜底整块又把每个模型重复列出来（slim 过滤被去掉）',
+		from: 'inlineSeen ? slimChildren : children',
+		to: 'inlineSeen ? children : children',
+		expect: 'H8j',
+	},
 ]
 
 let bad = 0

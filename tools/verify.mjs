@@ -787,6 +787,13 @@ check('H8 注释里写清了为什么不遮蔽官方界面', clientSource.includ
 	check('H8g 行内挂载成功时座位里那块让位（不依赖 :has）', css.includes('.dsh-rs-box[data-inline="1"] { display: none; }'))
 	check('H8h 编辑态判据排除已行内挂载的情况', css.includes('.dsh-rs-box:not([data-inline="1"])'))
 	check('H8i 门户容器 / 行内控件 / 保存条都有样式', css.includes('.dsh-rs-inline-host:empty') && css.includes('.dsh-rs-inline-row') && css.includes('.dsh-rs-bar'))
+	{
+		// 行内成功过之后，兜底整块不得再重复列出每个模型的勾选组（slim 过滤）：那是"看起来有两份设置"的元凶。
+		const listStart = clientSource.indexOf('const slimChildren = [];')
+		const listEnd = clientSource.indexOf('const box = react.createElement(', listStart)
+		const slim = listStart >= 0 && listEnd > listStart ? clientSource.slice(listStart, listEnd) : ''
+		check('H8j 行内成功过后兜底整块剔除模型列表（slim 过滤存在且作用于 box 内容）', slim.includes('child.key === "list"') && clientSource.includes('inlineSeen ? slimChildren : children'))
+	}
 }
 
 {
