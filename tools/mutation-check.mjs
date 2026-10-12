@@ -89,10 +89,28 @@ const mutations = [
 		expect: 'I0',
 	},
 	{
-		name: 'M13 行内成功过后兜底整块又把每个模型重复列出来（slim 过滤被去掉）',
-		from: 'inlineSeen ? slimChildren : children',
-		to: 'inlineSeen ? children : children',
+		name: 'M13 让位条件退回「必须已挂上行内容器」（折叠态又会铺出整块兜底）',
+		from: 'const inlineActive = reactDom !== undefined && attachment.bar !== undefined;',
+		to: 'const inlineActive = reactDom !== undefined && attachment.rows.length > 0;',
 		expect: 'H8j',
+	},
+	{
+		name: 'M14 结构判定只看展开体（折叠态被误判成"官方结构变了"，又铺出整块）',
+		from: 'if (modelHeadersUnder(card, models).length === 0) return EMPTY_ATTACH;',
+		to: 'if (modelRowsUnder(card).length === 0) return EMPTY_ATTACH;',
+		expect: 'I14',
+	},
+	{
+		name: 'M15 行内容器不再跨列（只剩半宽，八个勾选框被挤成参差多行）',
+		from: '.dsh-rs-inline-host { grid-column: 1 / -1; }',
+		to: '.dsh-rs-inline-host { grid-column: auto; }',
+		expect: 'H8l',
+	},
+	{
+		name: 'M16 勾选框尺寸不再照抄官方（16px → 12px）',
+		from: '\twidth: 16px;\n\theight: 16px;',
+		to: '\twidth: 12px;\n\theight: 12px;',
+		expect: 'H8m',
 	},
 ]
 

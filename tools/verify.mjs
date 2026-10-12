@@ -178,7 +178,9 @@ function makeReact() {
 	}
 
 	return {
-		react: { createElement, Component, useState, useEffect, useCallback, useMemo, Fragment: Symbol.for('react.fragment') },
+		// useLayoutEffect 在真实 React 里与 useEffect 同为 hook，语义差别只在"绘制前还是绘制后"；
+		// 自检不需要区分时序，所以直接共用同一份实现（顺序调用、同样返回 cleanup）。
+		react: { createElement, Component, useState, useEffect, useLayoutEffect: useEffect, useCallback, useMemo, Fragment: Symbol.for('react.fragment') },
 		render,
 		markDirty: () => {
 			dirty = true
@@ -788,11 +790,14 @@ check('H8 注释里写清了为什么不遮蔽官方界面', clientSource.includ
 	check('H8h 编辑态判据排除已行内挂载的情况', css.includes('.dsh-rs-box:not([data-inline="1"])'))
 	check('H8i 门户容器 / 行内控件 / 保存条都有样式', css.includes('.dsh-rs-inline-host:empty') && css.includes('.dsh-rs-inline-row') && css.includes('.dsh-rs-bar'))
 	{
-		// 行内成功过之后，兜底整块不得再重复列出每个模型的勾选组（slim 过滤）：那是"看起来有两份设置"的元凶。
-		const listStart = clientSource.indexOf('const slimChildren = [];')
-		const listEnd = clientSource.indexOf('const box = react.createElement(', listStart)
-		const slim = listStart >= 0 && listEnd > listStart ? clientSource.slice(listStart, listEnd) : ''
-		check('H8j 行内成功过后兜底整块剔除模型列表（slim 过滤存在且作用于 box 内容）', slim.includes('child.key === "list"') && clientSource.includes('inlineSeen ? slimChildren : children'))
+		// 认得出官方模型行（展开或折叠都算）时，座位里那块必须**整个让位**，否则会同时出现两份设置。
+		const boxAt = clientSource.indexOf('const box = react.createElement(')
+		const boxBlock = boxAt < 0 ? '' : clientSource.slice(Math.max(0, boxAt - 900), boxAt)
+		check('H8j 认得出模型行即让位（inlineActive 由保存条判定 + box 只在没让位时渲染 children）', boxBlock.includes('inlineActive = reactDom !== undefined && attachment.bar !== undefined') && clientSource.includes('inlineActive ? [] : children'))
+		// 折叠的行也要认得出来：光看「有没有展开体」会把折叠态误判成"官方结构变了"，于是又铺出整块。
+		check('H8k 折叠的模型行也算「认得出」（modelHeadersUnder 参与判定）', clientSource.includes('modelHeadersUnder(card, models).length === 0') && clientSource.includes('function modelHeadersUnder'))
+		check('H8l 行内容器跨满两列（官方 modelAdvanced 是两列网格，不跨列只剩半宽）', css.includes('.dsh-rs-inline-host { grid-column: 1 / -1; }'))
+		check('H8m 勾选项逐值照抄官方（16px 勾选框 + 14px/20px 文本 + 品牌色 accent）', css.includes('width: 16px;') && css.includes('font-size: 14px;') && css.includes('line-height: 20px;') && css.includes('accent-color: var(--dsw-alias-brand-primary)') && css.includes('font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary'))
 	}
 }
 
@@ -875,8 +880,9 @@ function makeFakeDom() {
 /**
  * 搭一张「官方 pi-ai 卡片」的假 DOM：行头两个输入框（id / 显示名）+ 展开体里一个 fieldset（输入类型），
  * 外加一个不属于任何模型行的诱饵 fieldset（它没有行头，必须被忽略）。
+ * `collapsed` 时只渲染行头、不渲染展开体 —— 官方 ModelRow 折叠时就是这个形态。
  */
-function fakeCard(dom, ids = ['cn:a', 'cn:b']) {
+function fakeCard(dom, ids = ['cn:a', 'cn:b'], { collapsed = false } = {}) {
 	const make = (tag) => dom.createElement(tag)
 	const card = make('li')
 	const head = make('div')
@@ -899,12 +905,16 @@ function fakeCard(dom, ids = ['cn:a', 'cn:b']) {
 		nameInput.type = 'text'
 		header.appendChild(idInput)
 		header.appendChild(nameInput)
-		const body = make('div')
-		const fieldset = make('fieldset')
-		fieldset.appendChild(make('legend'))
-		body.appendChild(fieldset)
 		entry.appendChild(header)
-		entry.appendChild(body)
+		let body
+		let fieldset
+		if (!collapsed) {
+			body = make('div')
+			fieldset = make('fieldset')
+			fieldset.appendChild(make('legend'))
+			body.appendChild(fieldset)
+			entry.appendChild(body)
+		}
 		card.appendChild(entry)
 		rows.push({ id, header, body, fieldset })
 	}
@@ -986,6 +996,17 @@ function fakeCard(dom, ids = ['cn:a', 'cn:b']) {
 			})(),
 			t.oursMutation({ target: built.card, addedNodes: [dom.makeElement('p')] }),
 		])
+
+		// 折叠的模型行：只认「有没有展开体」会把它误判成"官方结构变了"，于是又铺出整块兜底 —— 必须仍然认得出。
+		const collapsed = fakeCard(dom.document, ['cn:a', 'cn:b'], { collapsed: true })
+		checkSame('I13 折叠行的行头也认得出来（modelHeadersUnder）', t.modelHeadersUnder(collapsed.card, [{ id: 'cn:a' }, { id: 'cn:b' }]).map((row) => row.id), ['cn:a', 'cn:b'])
+		checkSame('I13b 展开体扫描在折叠时为空（所以不能只靠它判定结构）', t.modelRowsUnder(collapsed.card), [])
+		const foldedAttachment = t.attachInline(collapsed.box, [{ id: 'cn:a' }, { id: 'cn:b' }])
+		check(
+			'I14 折叠态：挂保存条但一个行内容器都不插（present 为真 ⇒ 座位里那块让位）',
+			foldedAttachment !== t.EMPTY_ATTACH && foldedAttachment.rows.length === 0 && foldedAttachment.bar !== undefined && foldedAttachment.present === true && collapsed.rows.every((row) => row.body === undefined),
+		)
+		t.detachInline(foldedAttachment)
 	}
 }
 
@@ -994,7 +1015,7 @@ function fakeCard(dom, ids = ['cn:a', 'cn:b']) {
 	const result = await mount({ reactDomUnavailable: true }).catch((error) => error)
 	const failed = result instanceof Error
 	check(
-		'I13 react-dom 缺失时退回座位里的整块（不崩、不缺功能）',
+		'I15 react-dom 缺失时退回座位里的整块（不崩、不缺功能）',
 		!failed && treeText(result.tree).includes('思考强度') && modelRows(result.tree).length === 2,
 		failed ? String(result.message) : '',
 	)
