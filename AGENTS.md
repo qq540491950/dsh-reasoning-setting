@@ -227,6 +227,12 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   low/medium/high；`global:deepseek-v4.1-flash`: high/max）与 `providers.tengxun.models[].reasoningEfforts`
   （三个模型），其余条目逐字节未动。这次之后才补的"行内保存入口"与"默认档位下拉"属于**还没上真机**的部分。
 - 离线自检 193/193（`--patch` 时 195/195）+ 30 项反向验证（M1–M30）全部命中。
+- **用户明确要求后，直接改过一次 profile**（2026-10-12 20:17，破例，第 8 节默认禁止）：备份
+  `cordis.patch.yml.bak-1791807420700`，在 `providers.huawei` 下外科式插入一行 `reasoning: high`
+  （只多这一行，去掉它后整份文档与备份深度相等；`insert:` 分节与注释未动，仍是 LF），
+  `--patch` 自检仍 195/195。**注意**：`reconcileProfilePatches` 只由 `dsh-config-editor` 的
+  `settings.mutate` 调用，**没有任何文件监听器**——所以手改 `cordis.patch.yml` 必须**重启 DSH**
+  才生效（Ctrl+R 不够，配置在宿主进程里）。
 
 还没验证（改这块之前请先补上）：
 
