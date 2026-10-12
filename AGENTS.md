@@ -21,7 +21,7 @@ DSH 桌面端（Web GUI）的**纯客户端**插件：在「设置 → 模型」
 | `lib/index.js` | 宿主半边：空的 `apply`，仅作为 Loader 的接线柱 | 低，但**不许删**：删了 `dsh-client-modules` 从该条目向上找不到 `package.json`，客户端 bundle 就不再投递 |
 | `package.json` | 包清单契约（第 4 节） | 中——改错就整体不加载 |
 | `tools/verify.mjs` | 离线自检：纯 Node、零依赖，用 `node:vm` 跑**真实的** `lib/client.js`（自带会真跑 hooks、能点击重渲染的 React 替身） | 低；改它必须同步改断言，**不许为了让它变绿而放宽断言** |
-| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 26 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
+| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 30 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
 | `README.md` | 面向使用者的介绍与使用说明 | 低 |
 | `AGENTS.md` | 本文件（工程约束） | 低 |
 
@@ -105,7 +105,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | 没被改过的模型必须 `return model`（同一个对象引用，逐字节不动） | 一旦复制/重建，就会把 schema 默认值、甚至 `!!js` 表达式的惰性形状物化进用户配置 | verify E20 / F20 |
 | `reasoningEfforts.off` 写 `null`；其它档位必须写**非空字符串** | `resolveModelReasoning` 的校验：非 off 档位的 `null` / 空串直接 `invalid`；而 `off: null` 是"支持关闭、不发参数"的唯一表达 | verify E12 / M5 |
 | 不许写空字典 `{}`、不写 `null`、不许只勾 `off` | 同上：空字典与 `null` 报 "empty reasoningEfforts"，只有 off 报 "offers no level beyond off"。界面上"全不勾"= 删字段（合法），"只勾 off"= 就地拦下 | verify E15 / F9 / F10 |
-| 读取优先 profile **user** 层，其次 **base**（继承）层；**不要**用 describe 的 `value`（解析后的生效值）当数据源 | `value` 已填好默认值，写回会把默认值物化；官方编辑器同样只用 `user`/`base`（其注释写明了这个坑） | verify G18 |
+| 读取优先 profile **user** 层，其次 **base**（继承）层；**不要**用 describe 的 `value`（解析后的生效值）当数据源 | `value` 已填好默认值，写回会把默认值物化；官方编辑器同样只用 `user`/`base`（其注释写明了这个坑） | verify G18 / F54 |
 | `require` 只能取平台种子模块（本插件实际取 `react` 与 `react-dom`；后者取不到时必须降级而不是崩） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 / I0 / I15 / M12 |
 | 宿主半边零 `import`、导出 `apply` | 它只当接线柱；多引入依赖就多一个失败面 | verify B1/B2 |
 | 只注册 keyed 座位，**不要**加 `priority`、不要注册 `single` 座位 | keyed 座位的唯一性约束在 `(key, priority)`，重复注册直接抛错；`single` 才会遮蔽官方 UI，本插件不需要也没有抢位 | 约定 + verify D3 |
@@ -115,6 +115,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | 自己插的节点必须带 `data-dsh-rs-own`，并从 `MutationObserver` 里滤掉 | 不滤就是"插容器 → 观察到自己 → 重挂 → 再观察"的死循环 | verify I6 / I12 |
 | 行内保存入口与卡片底部保存条是**同一个 `save` + 同一份 `saveDisabled` 判据**；有未保存草稿的行必须自带「保存到配置 / 放弃这一行」并把提示贴在该行 | 保存条隔着整个官方编辑器，只有底部一个入口时用户勾完就走、以为"设置了却没生效"（草稿只活在组件 state 里，重开配置页即还原）——真机上就是这么踩的 | verify E31–E38 / I16–I18 / M17–M21 |
 | 路由默认档位（`providers.<route>.reasoning`）只能取**每个模型都声明过**的档位；推荐值 = 共同档位里最高的那个（max 优先，依次向下）；一个共同档位都没有就只给「不设置」；`off` 不进候选；「不设置」写 `unset` 而不是空串 | 它是"请求没带显式档位"时的兜底（`resolveReasoningLevel(model, undefined ?? profile.reasoning)`），取并集会让没声明它的模型每次请求都被拒（`UNSUPPORTED_REASONING_EFFORT`）；写空串会被 schema 拒绝 | verify E39–E47 / F29–F41 / M23–M26 |
+| 推荐值必须**预选**在下拉里，且预选要算进「有改动」；写回后要采纳返回值里的 `reasoning`；明确选过「不设置」要把 `null` 草稿留住 | 预选不算改动 ⇒ 保存按钮灰着，这个值**永远写不进去**（真机上卡住的就是这一步：下拉显示「不设置」、按钮点不动）；写回不采纳返回值 ⇒ 刚存完又被预选顶回来、按钮一直亮着；unset 后丢掉草稿同理 | verify F42–F53 / M27–M29 |
 | `routeDraft` 这个 `useState` 必须和其它 hook 排在一起（所有提前 `return null` 之前） | 挂在守卫分支之后时，命中守卫（命名空间不匹配 / 非手写路由没有模型）就少一个 hook，React 直接抛错、整棵树降级成一行"面板加载失败"——写这个控件时就真踩了一次 | verify G14 / G16 |
 | 文案硬编码中文、**不注册 locale 命名空间** | 有意少一个失败面 | 约定 |
 | 视觉只用 `--dsw-alias-*` token，不裸写颜色（`var()` 兜底值可以） | 亮暗主题都要成立 | 人工 + 人工复核 |
@@ -153,7 +154,7 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
    node tools/mutation-check.mjs
    ```
 
-   必须看到 26 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
+   必须看到 30 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
    "看起来没问题"替代实际输出。
 5. 只有第 3、4 步都过了才有资格说"改好了"。
 6. 提交（第 7 节）。
@@ -225,7 +226,7 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   `providers.huawei.models[].reasoningEfforts`（`global:hy3`: low/high；`global:step-5-preview`:
   low/medium/high；`global:deepseek-v4.1-flash`: high/max）与 `providers.tengxun.models[].reasoningEfforts`
   （三个模型），其余条目逐字节未动。这次之后才补的"行内保存入口"与"默认档位下拉"属于**还没上真机**的部分。
-- 离线自检 179/179（`--patch` 时 181/181）+ 26 项反向验证（M1–M26）全部命中。
+- 离线自检 193/193（`--patch` 时 195/195）+ 30 项反向验证（M1–M30）全部命中。
 
 还没验证（改这块之前请先补上）：
 
@@ -243,9 +244,12 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   保存失败（冲突等）时原因也贴在这一行。门户里的子树在 vm 里渲染不出来，离线只静态守住这三条不变量
   （I16–I18）。
 - **「默认档位」下拉还没上真机**：它写路由级 `providers.<route>.reasoning`，下拉里只列"每个模型都
-  勾过的档位"（+「不设置」）。要复看的：huawei 卡片的下拉里应只有 `high`（三个模型的交集）与「不设置」；
-  选 `high` 保存后，切到该路由任一模型时选择器"默认"那一格显示 High；`cordis.patch.yml` 里
-  `providers.huawei.reasoning: high` 出现且其余条目逐字节未动。
+  勾过的档位"（+「不设置」），并且**路由还没设过时直接预选共同档位里最高的那个**。要复看的：
+  huawei 卡片的下拉里只有 `high`（三个模型的交集）与「不设置」，且打开就是 `high`；**不碰下拉、
+  直接点一次「保存到配置」**，`cordis.patch.yml` 里就应出现 `providers.huawei.reasoning: high`
+  且其余条目逐字节未动；之后切到该路由任一模型时选择器"默认"那一格显示 High；点「放弃改动」能
+  把预选一起丢掉。**注意**：正因为预选算"有改动"，卡片一打开保存按钮就是亮的（有未保存的改动），
+  这是设计如此，不是 bug。
 - **"只在编辑态出现"的 CSS 判据还没在真机确认过**：机制是 `@supports selector(:has(*))` +
   `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"])) .dsh-rs-box:not([data-inline="1"])`，
   依据是官方 `SlotOutlet` 把占用者包在 `div[data-slot]` 里（`display: contents`）、且官方编辑器必然

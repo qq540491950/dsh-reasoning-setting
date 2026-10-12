@@ -298,6 +298,17 @@ function makeDescribeResult({ models = [flashModel, stepModel], writable = true,
 	}
 }
 
+/**
+ * 把夹具改成「这条路由没设默认档位」：`reasoning` 这个字段三层都不写。
+ * 不能靠 `makeDescribeResult({ reasoning: undefined })` —— 解构默认值对 undefined 生效，会变回 'max'。
+ */
+function withoutRouteDefault(result) {
+	const ns = result.value.namespaces[0]
+	delete ns.user.providers.cpa.reasoning
+	delete ns.value.providers.cpa.reasoning
+	return result
+}
+
 /** 造一个座位 owner props。 */
 function makeSeatProps({ settingsNs = 'llm-pi-ai', declared = true, settingsPath } = {}) {
 	const provider = { provider: 'cpa', displayName: 'cpa', settingsNs, settingsPath: settingsPath ?? ['providers', 'cpa'], active: true, declared }
@@ -362,7 +373,15 @@ async function mount({ describeResults, mutate, seatProps, subscribes = true, re
 		logs.mutate.push({ ns, ops: clone(ops), revision })
 		if (mutate !== undefined) return clone(await mutate(ns, ops, revision))
 		for (const op of ops) {
-			if (op.op !== 'set' || service === undefined) continue
+			if (service === undefined) continue
+			if (op.op === 'unset') {
+				// 与 dsh-config-editor 同语义：删掉这个节点（「不设置」= 配置里没有这个字段）。
+				let node = service.user
+				for (const key of op.path.slice(0, -1)) node = node === null || typeof node !== 'object' ? undefined : node[key]
+				if (node !== null && typeof node === 'object') delete node[op.path[op.path.length - 1]]
+				continue
+			}
+			if (op.op !== 'set') continue
 			let node = service.user
 			for (const key of op.path.slice(0, -1)) {
 				if (node[key] === null || typeof node[key] !== 'object') node[key] = {}
@@ -661,7 +680,7 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	// 再勾上 max，提示消失
 	await workbench.change(levelBox(modelRows(workbench.tree)[1], 'max'))
 	check('F13 勾上默认档位后提示消失', !treeText(workbench.tree).includes('该路由的默认档位是 max'))
-	check('F13b 未保存提示在页脚（紧挨保存按钮）', treeText(byClass(workbench.tree, 'dsh-rs-foot')[0]).includes('有未保存的勾选'))
+	check('F13b 未保存提示在页脚（紧挨保存按钮）', treeText(byClass(workbench.tree, 'dsh-rs-foot')[0]).includes('有未保存的改动'))
 
 	await workbench.click(buttonWithText(workbench.tree, '保存到配置'))
 	checkSame('F15 mutate 一次', workbench.logs.mutate.length, 1)
@@ -690,9 +709,9 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	// 非推理 + 放弃改动
 	await workbench.change(noneBox(modelRows(workbench.tree)[0]))
 	check('F26a 非推理勾上后档位勾选变灰', levelBox(modelRows(workbench.tree)[0], 'low')?.props.disabled === true)
-	check('F26 有未保存改动时有提示', treeText(workbench.tree).includes('有未保存的勾选'))
+	check('F26 有未保存改动时有提示', treeText(workbench.tree).includes('有未保存的改动'))
 	await workbench.click(buttonWithText(workbench.tree, '放弃改动'))
-	check('F27 放弃后回到已保存状态', !treeText(workbench.tree).includes('有未保存的勾选') && saveButton(workbench.tree).props.disabled === true)
+	check('F27 放弃后回到已保存状态', !treeText(workbench.tree).includes('有未保存的改动') && saveButton(workbench.tree).props.disabled === true)
 	checkSame('F28 __test 常量与代码一致', t.NAMESPACES, ['llm-pi-ai'])
 
 	// 路由默认档位：选一次就写 `providers.<route>.reasoning`；与逐模型勾选共用一次保存。
@@ -731,6 +750,44 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 		check('F40 「不设置」= unset reasoning（而不是写空串）', unsetCall.ops[1] !== undefined && unsetCall.ops[1].op === 'unset')
 		// 不是共同声明的档位不出现在下拉里：选了它会让没勾它的模型在请求时被拒。
 		check('F41 未共同声明的档位不出现在下拉里', !optionValues(select).includes('medium'))
+	}
+
+	// 推荐值必须**预选**：路由还没设默认档位时，只勾模型档位就保存，默认档位也要跟着落盘。
+	// （真机上卡住的就是这一步：下拉显示「不设置」+ 保存按钮灰着 ⇒ 默认档位永远写不进去。）
+	{
+		const bothShared = { id: 'cn:step-5-preview', name: 'cn:step-5-preview', contextWindow: 1000000, maxTokens: 64000, input: ['text', 'image'], reasoningEfforts: { high: 'high', max: 'max' } }
+		const noRoute = withoutRouteDefault(makeDescribeResult({ models: [flashModel, bothShared] }))
+		const bench = await mount({ describeResults: [noRoute] })
+		const selectOf = (tree) => byClass(tree, 'dsh-rs-routedefault-select')[0]
+		check('F42 路由没设默认档位时，下拉预选共同档位里最高的那个（max 有就是 max）', selectValue(selectOf(bench.tree)) === 'max', String(selectValue(selectOf(bench.tree))))
+		check('F43 预选也算未保存改动（否则保存按钮是灰的，默认档位永远写不进去）', saveButton(bench.tree).props.disabled === false)
+		checkSame('F44 预选不改候选列表', optionValues(selectOf(bench.tree)), ['', 'high', 'max'])
+		check('F44b 提示写明已预选', treeText(byClass(bench.tree, 'dsh-rs-routedefault')[0]).includes('预选'))
+		await bench.click(buttonWithText(bench.tree, '保存到配置'))
+		const preselectCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
+		checkSame('F45 一次保存就带上路由默认档位（两条 op）', preselectCall.ops.length, 2)
+		check(
+			'F46 第二条把预选值写进 reasoning',
+			preselectCall.ops[1] !== undefined && preselectCall.ops[1].op === 'set' && preselectCall.ops[1].path.join('/') === 'providers/cpa/reasoning' && preselectCall.ops[1].value === 'max',
+		)
+		check('F47 写回后采纳返回值（按钮禁用、不再显示未保存）', saveButton(bench.tree).props.disabled === true && !treeText(bench.tree).includes('有未保存的改动'))
+		check('F48 写回后下拉显示写下去的值', selectValue(selectOf(bench.tree)) === 'max')
+		// 明确选「不设置」：写 unset，并且写回后不被预选顶回来（否则卡片会一直"有未保存"）。
+		await bench.change(selectOf(bench.tree), '')
+		check('F49 选「不设置」时按钮可用', saveButton(bench.tree).props.disabled === false)
+		await bench.click(buttonWithText(bench.tree, '保存到配置'))
+		const unsetCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
+		check('F50 「不设置」= unset（不是空串）', unsetCall.ops.length === 2 && unsetCall.ops[1] !== undefined && unsetCall.ops[1].op === 'unset')
+		check('F51 unset 写回后回到干净态', saveButton(bench.tree).props.disabled === true)
+		check('F52 unset 写回后下拉保持「不设置」', selectValue(selectOf(bench.tree)) === '')
+		// 重开卡片：推荐值重新预选（它只是建议，不自动写；用户可以不理会，也可以选「不设置」）。
+		const reopened = await mount({ describeResults: [noRoute] })
+		check('F53 重开卡片时推荐值重新预选', selectValue(selectOf(reopened.tree)) === 'max')
+		// 解析后的生效值里有 reasoning（模拟 schema 给了默认值）不能当成"用户设过"。
+		const valueDefault = withoutRouteDefault(makeDescribeResult({ models: [flashModel, bothShared] }))
+		valueDefault.value.namespaces[0].value.providers.cpa.reasoning = 'low'
+		const guarded = await mount({ describeResults: [valueDefault] })
+		check('F54 只看 user/base 两层：value 里的默认值不算已设置（仍按推荐预选 max）', selectValue(selectOf(guarded.tree)) === 'max', String(selectValue(selectOf(guarded.tree))))
 	}
 }
 
@@ -787,7 +844,7 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	await refused.change(levelBox(modelRows(refused.tree)[1], 'low'))
 	await refused.click(buttonWithText(refused.tree, '保存到配置'))
 	check('G10 被拒绝时给原因', treeText(refused.tree).includes('写入被拒绝：nope'))
-	check('G11 被拒绝后草稿还在', treeText(refused.tree).includes('有未保存的勾选'))
+	check('G11 被拒绝后草稿还在', treeText(refused.tree).includes('有未保存的改动'))
 }
 
 {

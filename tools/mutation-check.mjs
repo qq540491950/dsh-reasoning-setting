@@ -144,7 +144,7 @@ const mutations = [
 	},
 	{
 		name: 'M22 保存成功文案退回「随即生效」（把"声明"说成"已生效"）',
-		from: 'setNote("已写入 profile 的 cordis.patch.yml：模型选择器里选一次档位，请求才会带上它");',
+		from: 'setNote(`已写入 profile 的 cordis.patch.yml：${effectiveRouteDefault === null ? "默认档位保持不设置" : `默认档位 ${effectiveRouteDefault}`}；临时换档位在模型选择器里选一次即可`);',
 		to: 'setNote("已写入 profile 的 cordis.patch.yml（模型选择器随即生效）");',
 		expect: 'F21',
 	},
@@ -171,6 +171,30 @@ const mutations = [
 		from: '? { op: "unset", path: routeReasoningPath }',
 		to: '? { op: "set", path: routeReasoningPath, value: "" }',
 		expect: 'F40',
+	},
+	{
+		name: 'M27 不再预选推荐档位（下拉停在「不设置」，默认档位永远写不进去）',
+		from: ': (profileRouteDefault ?? routeSuggestion ?? null);',
+		to: ': (profileRouteDefault ?? null);',
+		expect: 'F42',
+	},
+	{
+		name: 'M28 预选不算「有改动」（按钮灰着，点不动）',
+		from: 'const routeChanged = effectiveRouteDefault !== (profileRouteDefault ?? null);',
+		to: 'const routeChanged = routeDraft !== undefined && effectiveRouteDefault !== (profileRouteDefault ?? null);',
+		expect: 'F43',
+	},
+	{
+		name: 'M29 写回后不采纳返回的 reasoning（刚存完又被预选顶回来）',
+		from: 'routeDefault: typeof storedRoute === "string" ? storedRoute : undefined,',
+		to: 'routeDefault: undefined,',
+		expect: 'F47',
+	},
+	{
+		name: 'M30 路由默认档位又去读解析后的生效值（schema 一加默认值就会把"没设置"读成"设置了"）',
+		from: 'const routeDefault = getPath(descriptor.user, routePath) ?? getPath(descriptor.base, routePath);',
+		to: 'const routeDefault = getPath(descriptor.value, routePath);',
+		expect: 'F54',
 	},
 ]
 
