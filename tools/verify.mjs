@@ -2,16 +2,17 @@
  * dsh-reasoning-setting 自检程序（纯 Node，零依赖）。
  *
  * 用 `node:vm` 跑**真实的** `lib/client.js`，喂一个够用的 React 替身与假 ctx，
- * 覆盖七组断言：
+ * 覆盖九组断言：
  *   A. 包清单契约（dsh.client.platform / exports["./client"] / 模块 id 与包名一致）
  *   B. 宿主半边（零 import、导出 apply）
  *   C. 客户端模块协议（只 require 种子模块、导出 apply 与内部钩子）
  *   D. 座位注册（inject 清单、keyed 座位的 key、每个命名空间注册一次）
- *   E. 纯逻辑（草稿推导、校验、数组改写、只动被改过的行）
- *   F. 读写端到端（渲染 → 勾选 → 保存 → 断言 mutate 载荷与写回后的视图）
+ *   E. 纯逻辑（草稿推导、校验、数组改写、只动被改过的行、保存判据、放弃一行）
+ *   F. 读写端到端（渲染 → 勾选 → 保存 → 断言 mutate 载荷与写回后的视图与提示文案）
  *   G. 降级与边界（座位边界不退役、只读、冲突、读取失败、命名空间不匹配、空模型）
  *   H. 文件卫生（LF / 无 BOM / 无 U+FFFD）与可选的 profile 接线校验
- *   I. 行内挂载（结构锚点、门户容器只挂配置里的模型、撤销幂等、react-dom 缺失时退回整块）
+ *   I. 行内挂载（结构锚点、门户容器只挂配置里的模型、撤销幂等、react-dom 缺失时退回整块、
+ *      以及行内保存入口/提示/共用判据这三条静态不变量）
  *
  * 用法：
  *   node tools/verify.mjs
@@ -589,6 +590,20 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	checkSame('E28 getPath 正常', t.getPath({ a: { b: [{ c: 1 }] } }, ['a', 'b', '0', 'c']), 1)
 	check('E29 getPath 缺一段 → undefined', t.getPath({ a: {} }, ['a', 'b', 'c']) === undefined)
 	check('E30 getPath 穿非对象 → undefined', t.getPath({ a: 1 }, ['a', 'b']) === undefined)
+
+	// 「勾了却看起来没生效」那类故障的护栏：行内保存入口的判据 + 只丢一行的草稿。
+	checkSame('E31 放弃一行只删掉这个模型的草稿', t.dropDraft({ a: { levels: ['low'] }, b: { levels: ['max'] } }, 'a'), { b: { levels: ['max'] } })
+	{
+		const drafts = { a: { levels: ['low'] } }
+		t.dropDraft(drafts, 'a')
+		checkSame('E32 放弃一行不改动入参', drafts, { a: { levels: ['low'] } })
+		check('E33 没有这个键时原样返回同一个引用（状态更新短路）', t.dropDraft(drafts, 'zzz') === drafts)
+	}
+	check('E34 保存判据：只读 → 禁用', t.saveDisabled(false, false, true, 0) === true)
+	check('E35 保存判据：写入中 → 禁用', t.saveDisabled(true, true, true, 0) === true)
+	check('E36 保存判据：没有改动 → 禁用', t.saveDisabled(true, false, false, 0) === true)
+	check('E37 保存判据：有校验问题 → 禁用', t.saveDisabled(true, false, true, 1) === true)
+	check('E38 保存判据：可写 + 空闲 + 有改动 + 无问题 → 可用', t.saveDisabled(true, false, true, 0) === false)
 }
 
 //#endregion
@@ -642,7 +657,10 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	const written = call.ops[0] === undefined ? [] : call.ops[0].value
 	checkSame('F19 只改被勾选的模型', (written[1] ?? {}).reasoningEfforts, { off: null, low: 'low', max: 'max' })
 	checkSame('F20 没改过的模型逐字节不变', written[0], flashModel)
-	check('F21 写回后提示成功', treeText(workbench.tree).includes('已写入 profile 的 cordis.patch.yml'))
+	check(
+		'F21 写回后提示成功，并点明还要在模型选择器里选一次',
+		treeText(workbench.tree).includes('已写入 profile 的 cordis.patch.yml') && treeText(workbench.tree).includes('模型选择器里选一次'),
+	)
 	check('F23 写回后草稿清空（保存再次禁用）', saveButton(workbench.tree).props.disabled === true)
 	checkSame('F24 写回后勾选仍显示', checkedLabels(byClass(workbench.tree, 'dsh-rs-model')[1]), ['off', 'low', 'max'])
 
@@ -1018,6 +1036,27 @@ function fakeCard(dom, ids = ['cn:a', 'cn:b'], { collapsed = false } = {}) {
 		'I15 react-dom 缺失时退回座位里的整块（不崩、不缺功能）',
 		!failed && treeText(result.tree).includes('思考强度') && modelRows(result.tree).length === 2,
 		failed ? String(result.message) : '',
+	)
+}
+
+{
+	// 行内行自带的保存入口。门户里的那棵子树在 vm 里渲染不出来（React 替身不跑 ref，也不展开
+	// portal 的 children），所以按本仓库既有做法静态守住这条不变量：勾选框旁边必须有保存入口、
+	// 两处保存按钮共用同一判据、草稿还在时行内也贴提示。
+	// 这一条守的是一次真实故障：保存按钮只在卡片最底部，用户在模型行里勾完就走，以为"设置了却没生效"。
+	const sharedPredicate = (clientSource.match(/saveDisabled\(writable, busy, changed, problems\.length\)/g) ?? []).length
+	check(
+		'I16 行内有未保存勾选时自带「保存到配置 / 放弃这一行」，并带 dirty 标记',
+		clientSource.includes('if (hasDraft) parts.push(inlineActionsOf(key));') &&
+			clientSource.includes('放弃这一行') &&
+			clientSource.includes('dsh-rs-inline-actions') &&
+			clientSource.includes('dsh-rs-inline-row dsh-rs-dirty') &&
+			clientSource.includes('.dsh-rs-inline-row.dsh-rs-dirty'),
+	)
+	check('I17 两处保存按钮共用同一判据（行内一处 + 卡片底部一处）', sharedPredicate === 2, String(sharedPredicate))
+	check(
+		'I18 草稿还在时行内也贴出提示（保存失败的原因不必滚到卡片底部才看得到）',
+		clientSource.includes('if (hasDraft && note !== undefined) parts.push('),
 	)
 }
 

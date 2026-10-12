@@ -24,19 +24,25 @@
 
 **首选形态是行内的**：点开提供商的「编辑」、再展开某个模型行（那排 `上下文窗口 / 最大输出 token 数 /
 输入类型`），`思考强度` 就长在 `输入类型` 的正下方——和官方字段同一种语法：一行字段标签 + 一排勾选框。
-「保存到配置 / 放弃改动 / 提示」挂在这张卡片的最底部（官方编辑器页脚下方）。
+**这一行有未保存的勾选时，勾选框下面立刻出现「保存到配置 / 放弃这一行」**，同时这行左边会亮起一条
+告警色竖条 + 「未保存」小字。卡片最底部（官方编辑器页脚下方）另有一条保存条，作为兜底入口。
 
 ```
 cn:deepseek-v4.1-flash   （官方模型行）
     上下文窗口 [1M]   最大输出 token 数 [131072]
     输入类型   ☑ 文本  ☑ 图片
-    思考强度                                   恢复默认
+    思考强度   未保存                            恢复默认
     ☑ off  ☐ minimal  ☑ low  ☑ medium  ☑ high  ☐ xhigh  ☑ max      ☐ 非推理模型
+    [ 保存到配置 ]  放弃这一行          ← 有未保存勾选时才出现，就在勾选框下面
 
-    （卡片底部）
+    （卡片底部，同样有未保存勾选时才出现「有未保存的勾选」）
     未勾选任何档位 = 不写这个字段（继承适配器/目录的能力）；勾「非推理模型」= 写 reasoningEfforts: false。
     [ 保存到配置 ]  放弃改动   有未保存的勾选
 ```
+
+> 为什么行内也要有一个保存入口：行内勾选框在模型行里，而卡片底部那条保存条隔着整个官方编辑器。
+> 只有底部一个入口时，勾完就走、以为"已经设置了"，其实草稿只活在组件 state 里，重开配置页就还原
+> （真机上就是这么踩的）。两处按钮是**同一个 `save`**，禁用判据也共用 `saveDisabled`，不会分叉。
 
 **行内挂不上时自动退回整块**（还是同样的控件，渲染在卡片顶部、官方编辑器上方）。触发回退的情况：
 拿不到 `react-dom` 种子、官方改了模型行的 DOM 结构、或这个模型还没写进配置。
@@ -79,11 +85,15 @@ cn:deepseek-v4.1-flash   （官方模型行）
 | 点档位勾选框 | 就地改草稿（不会立刻写盘）；勾了就自动取消「非推理模型」 |
 | 点「非推理模型」 | 写 `reasoningEfforts: false`；原有档位勾选休眠保留 |
 | 点「恢复默认」 | 把该模型的草稿清成"不写这个字段"（继承）；行内形态常驻、未声明时置灰 |
-| 「保存到配置」 | 一次 `settings.mutate` 把整段 `models` 数组写回 profile 配置；成功后就地采用返回的 revision |
+| 行内「保存到配置」 | 有未保存勾选时出现在勾选框下面；一次 `settings.mutate` 把整段 `models` 数组写回 profile 配置（这张卡上所有未保存的勾选一起写），成功后就地采用返回的 revision |
+| 行内「放弃这一行」 | 只丢这一个模型的草稿，其它行的未保存改动保留 |
+| 卡片底部「保存到配置」 | 与行内那个按钮同一个动作（兜底入口；卡片折叠时只剩它） |
 | 「放弃改动」 | 丢弃全部草稿，回到已保存状态 |
 | 读取失败 | 显示原因 + 「重试」按钮，**不退役座位条目** |
 
-写入是**显式保存**的（与官方模型编辑器同一个交互）：勾选期间不写盘。
+写入是**显式保存**的（与官方模型编辑器同一个交互）：勾选期间不写盘，点「保存到配置」才写。
+保存成功后提示会点明：**还要在 composer 的档位面板里选一次档位**，请求才会带上它——
+勾选写的是"这个模型提供哪些档位"（能力声明），不是"用哪个档位"。
 
 ## 它是怎么工作的
 
@@ -162,8 +172,8 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\verify.mjs --patch "C:\U
 
 纯 Node、零依赖的离线程序：用 `node:vm` 跑**真实的** `lib/client.js`，喂一个会真跑 hooks、
 能点击重渲染的 React 替身与一个会真的把 `set` op 应用进 user 层、递增 revision 的假 settings 服务，
-覆盖 9 组共 138 条断言（含"渲染 → 勾选 → 保存 → 断言 `mutate` 载荷与写回后视图"的端到端链路，
-以及用假 DOM 断言行内挂载的结构锚点、挂/撤、观察者过滤与降级路径）。
+覆盖 9 组共 156 条断言（`--patch` 时 158 条；含"渲染 → 勾选 → 保存 → 断言 `mutate` 载荷与写回后
+视图"的端到端链路，以及用假 DOM 断言行内挂载的结构锚点、挂/撤、观察者过滤与降级路径）。
 全部通过时打印 `全部通过 ✓` 并以 0 退出。
 
 新加断言必须做**反向验证**（注入违规、看它变红、再还原）：
@@ -172,9 +182,9 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\verify.mjs --patch "C:\U
 node D:\project\dsh-plugins\dsh-reasoning-setting\tools\mutation-check.mjs
 ```
 
-12 条注入（写入路径、未改动行逐字节保留、座位边界、inject 清单、座位 key、数据源层级、off 的 null、
-编辑态可见性的两个要素、行内容器的插入位置、按模型 id 过滤、react-dom 缺失时的降级）
-必须全部命中；全部命中才算护栏真的存在。
+22 条注入（写入路径、未改动行逐字节保留、座位边界、inject 清单、座位 key、数据源层级、off 的 null、
+编辑态可见性的两个要素、行内容器的插入位置、按模型 id 过滤、react-dom 缺失时的降级、行内保存入口与
+其共用判据、行内提示、放弃一行只删一行、保存成功文案）必须全部命中；全部命中才算护栏真的存在。
 
 ## 已知取舍
 
@@ -188,9 +198,10 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\mutation-check.mjs
   插件**自动退回座位里的整块形态**并在控制台留一条警告——功能不会消失，位置退回卡片顶部。
   反过来它也永远不去动官方节点本身：只追加自己的容器，官方卸载子树时容器随之消失，
   下一次对账再补回来。
-- **两处保存入口并存**：行内的勾选组与卡片底部的保存条都只是**草稿**的展示面（同一份 state），
-  写盘只走「保存到配置」这一个入口。官方编辑器自己的「保存」用的是它打开时的 revision，
-  期间我们写过配置的话它会被 `settings/conflict` 拒绝并提示——两边互不静默覆盖。
+- **三个保存入口，一份判据**：行内每一条有草稿的模型行、卡片底部的保存条，都只是**草稿**的展示面
+  （同一份 state、同一个 `save`、同一个 `saveDisabled` 判据）。「放弃这一行」只丢一行的草稿，
+  「放弃改动」丢全部。官方编辑器自己的「保存」用的是它打开时的 revision，期间我们写过配置的话
+  它会被 `settings/conflict` 拒绝并提示——两边互不静默覆盖。
 - **只管 pi-ai 家族**（`llm-pi-ai`，即自定义 / 第三方模型路由）：`llm-deepseek` 家族的模型没有
   按模型的推理字段（那边是 provider 级 `reasoningEffort`），所以不在范围里。加一个命名空间 =
   在 `lib/client.js` 的 `NAMESPACES` 里加一项。
@@ -207,11 +218,12 @@ node D:\project\dsh-plugins\dsh-reasoning-setting\tools\mutation-check.mjs
 
 ```
 dsh-reasoning-setting/
-  package.json      包清单：exports{"./client"} + dsh.client{platform:"web"}
-  lib/index.js      宿主半边：空的 apply，只作为 Loader 的接线柱
-  lib/client.js     浏览器半边：window.__ModuleLoader__ 懒 CJS bundle（全部 UI 与读写）
-  tools/verify.mjs  自检程序（纯 Node，零依赖）
-  AGENTS.md         工程约束：硬规则、不变量、改动流程
+  package.json          包清单：exports{"./client"} + dsh.client{platform:"web"}
+  lib/index.js          宿主半边：空的 apply，只作为 Loader 的接线柱
+  lib/client.js         浏览器半边：window.__ModuleLoader__ 懒 CJS bundle（全部 UI 与读写）
+  tools/verify.mjs      自检程序（纯 Node，零依赖）
+  tools/mutation-check.mjs  反向验证：往 client.js 注入 22 条违规，确认自检真的会红
+  AGENTS.md             工程约束：硬规则、不变量、改动流程
 ```
 
 运行时**零依赖**：宿主半边不 import 任何东西；浏览器半边只 `require("react")` 与

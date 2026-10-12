@@ -112,6 +112,42 @@ const mutations = [
 		to: '\twidth: 12px;\n\theight: 12px;',
 		expect: 'H8m',
 	},
+	{
+		name: 'M17 放弃一行时不再判断该键是否存在（没有该键也返回新对象）',
+		from: 'if (!Object.prototype.hasOwnProperty.call(drafts, key)) return drafts;',
+		to: 'if (false) return drafts;',
+		expect: 'E33',
+	},
+	{
+		name: 'M18 保存判据里「有校验问题」这一项失效（有问题的草稿也能点保存）',
+		from: 'return writable !== true || busy === true || changed !== true || problems > 0;',
+		to: 'return writable !== true || busy === true || changed !== true || problems > 99;',
+		expect: 'E37',
+	},
+	{
+		name: 'M19 行内不再渲染保存/放弃（又只剩卡片最底部那一个入口）',
+		from: 'if (hasDraft) parts.push(inlineActionsOf(key));',
+		to: 'if (false) parts.push(inlineActionsOf(key));',
+		expect: 'I16',
+	},
+	{
+		name: 'M20 行内保存按钮不再共用判据（改成"只读才禁用"）',
+		from: 'disabled: saveDisabled(writable, busy, changed, problems.length),',
+		to: 'disabled: !writable,',
+		expect: 'I17',
+	},
+	{
+		name: 'M21 行内不再贴出提示（保存失败的原因只有卡片底部看得到）',
+		from: 'if (hasDraft && note !== undefined) parts.push(react.createElement("p", { className: "dsh-rs-note", key: "note" }, note));',
+		to: 'if (false) parts.push(react.createElement("p", { className: "dsh-rs-note", key: "note" }, note));',
+		expect: 'I18',
+	},
+	{
+		name: 'M22 保存成功文案退回「随即生效」（把"声明"说成"已生效"）',
+		from: 'setNote("已写入 profile 的 cordis.patch.yml：模型选择器里选一次档位，请求才会带上它");',
+		to: 'setNote("已写入 profile 的 cordis.patch.yml（模型选择器随即生效）");',
+		expect: 'F21',
+	},
 ]
 
 let bad = 0
