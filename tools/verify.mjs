@@ -216,6 +216,14 @@ const levelLabels = (row) => byClass(row, 'dsh-rs-level').map((element) => (elem
 const modelRows = (tree) => byClass(tree, 'dsh-rs-model')
 /** 保存按钮；找不到时给一个空 props 的替身，让断言干净地失败。 */
 const saveButton = (node) => buttonWithText(node, '保存到配置') ?? { props: {} }
+/** target 是否在 root 子树里（按引用比较）。 */
+function containsNode(root, target) {
+	if (root === undefined || root === null || target === undefined || target === null) return false
+	if (root === target) return true
+	return (root.children ?? []).some((child) => containsNode(child, target))
+}
+/** 折叠区（座位拿不到"卡片是否在编辑"，所以整块默认折叠）。 */
+const foldOf = (tree) => byClass(tree, 'dsh-rs-fold')[0]
 
 //#endregion
 
@@ -584,6 +592,13 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	checkSame('F5b 勾选框标签按档位升序', levelLabels(rows[0]), ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 	checkSame('F5c 勾选状态来自配置', levelLabels(rows[0]).filter((label, index) => checkboxes(rows[0])[index].props.checked === true), ['off', 'low', 'medium', 'high', 'max'])
 	check('F7 未声明的模型没有勾选框（继承）', checkboxes(rows[1]).length === 0, String(checkboxes(rows[1]).length))
+
+	// 默认折叠：官方的 renderSlot 在卡片折叠态也会渲染这块，所以座位必须自己收起来。
+	const fold = foldOf(workbench.tree)
+	check('F7a 整块是默认折叠的 <details>', fold !== undefined && fold.type === 'details' && !Object.prototype.hasOwnProperty.call(fold.props, 'open'), JSON.stringify(fold === undefined ? null : fold.props))
+	check('F7b 摘要在折叠区里', containsNode(fold, byClass(workbench.tree, 'dsh-rs-summary')[0]))
+	checkSame('F7c 摘要给出模型计数', treeText(byClass(workbench.tree, 'dsh-rs-summary')[0]), '思考强度 2 个模型 · 1 个已声明')
+	check('F7d 模型行在折叠区里（折叠时只是不显示，不是不渲染）', modelRows(fold).length === 2)
 	check('F8 保存按钮初始禁用（没有改动）', saveButton(workbench.tree).props.disabled === true)
 
 	// 把第二个模型切到「自定义」
@@ -601,6 +616,7 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	// 再勾上 max，提示消失
 	await workbench.change(levelBox(modelRows(workbench.tree)[1], 'max'))
 	check('F14 勾上默认档位后提示消失', !treeText(workbench.tree).includes('该路由的默认档位是 max'))
+	check('F14b 未保存提示在摘要里（折叠着也看得见）', treeText(byClass(workbench.tree, 'dsh-rs-summary')[0]).includes('有未保存的勾选'))
 
 	await workbench.click(buttonWithText(workbench.tree, '保存到配置'))
 	checkSame('F15 mutate 一次', workbench.logs.mutate.length, 1)
@@ -612,6 +628,10 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	checkSame('F19 只改被勾选的模型', (written[1] ?? {}).reasoningEfforts, { low: 'low', max: 'max' })
 	checkSame('F20 没改过的模型逐字节不变', written[0], flashModel)
 	check('F21 写回后提示成功', treeText(workbench.tree).includes('已写入 profile 的 cordis.patch.yml'))
+	check(
+		'F21b 成功提示在折叠区之外（折叠着也看得见）',
+		!containsNode(foldOf(workbench.tree), byClass(workbench.tree, 'dsh-rs-note').find((element) => treeText(element).includes('已写入'))),
+	)
 	check('F23 写回后草稿清空（保存再次禁用）', saveButton(workbench.tree).props.disabled === true)
 	check('F24 写回后勾选仍显示', checkboxes(byClass(workbench.tree, 'dsh-rs-model')[1]).filter((box) => box.props.checked === true).length === 2)
 
@@ -661,6 +681,10 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	// G5 只读
 	const readonly = await mount({ describeResults: [makeDescribeResult({ writable: false })] })
 	check('G5 只读时提示', treeText(readonly.tree).includes('当前 profile 配置只读'))
+	check(
+		'G5b 只读提示在折叠区之外',
+		!containsNode(foldOf(readonly.tree), byClass(readonly.tree, 'dsh-rs-note').find((element) => treeText(element).includes('只读'))),
+	)
 	check('G6 只读时保存禁用', saveButton(readonly.tree).props.disabled === true)
 	check('G7 只读时勾选框禁用', checkboxes(readonly.tree).every((box) => box.props.disabled === true))
 }

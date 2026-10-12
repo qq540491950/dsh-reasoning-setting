@@ -5,8 +5,7 @@
  * 每次注入都会在 finally 里原样还原；任何一次「注入后仍然全绿」都算那条断言没有护栏。
  *
  * 用法（在仓库根目录）：node tools/mutation-check.mjs
- */
-import { readFileSync, writeFileSync } from 'node:fs'
+ */import { readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -58,6 +57,12 @@ const mutations = [
 		from: 'const models = Array.isArray(stored) ? stored : Array.isArray(inherited) ? inherited : [];',
 		to: 'const models = Array.isArray(getPath(descriptor.value, path)) ? getPath(descriptor.value, path) : [];',
 		expect: 'F20',
+	},
+	{
+		name: 'M8 整块默认展开（卡片折叠态也会铺开一大片）',
+		from: '{ className: "dsh-rs-fold", key: "fold" },',
+		to: '{ className: "dsh-rs-fold", key: "fold", open: true },',
+		expect: 'F7a',
 	},
 ]
 

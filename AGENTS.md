@@ -21,7 +21,7 @@ DSH 桌面端（Web GUI）的**纯客户端**插件：在「设置 → 模型」
 | `lib/index.js` | 宿主半边：空的 `apply`，仅作为 Loader 的接线柱 | 低，但**不许删**：删了 `dsh-client-modules` 从该条目向上找不到 `package.json`，客户端 bundle 就不再投递 |
 | `package.json` | 包清单契约（第 4 节） | 中——改错就整体不加载 |
 | `tools/verify.mjs` | 离线自检：纯 Node、零依赖，用 `node:vm` 跑**真实的** `lib/client.js`（自带会真跑 hooks、能点击重渲染的 React 替身） | 低；改它必须同步改断言，**不许为了让它变绿而放宽断言** |
-| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 7 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
+| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 8 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
 | `README.md` | 面向使用者的介绍与使用说明 | 低 |
 | `AGENTS.md` | 本文件（工程约束） | 低 |
 
@@ -90,6 +90,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | `require` 只能取平台种子模块（本插件实际只用 `react`） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 |
 | 宿主半边零 `import`、导出 `apply` | 它只当接线柱；多引入依赖就多一个失败面 | verify B1/B2 |
 | 只注册 keyed 座位，**不要**加 `priority`、不要注册 `single` 座位 | keyed 座位的唯一性约束在 `(key, priority)`，重复注册直接抛错；`single` 才会遮蔽官方 UI，本插件不需要也没有抢位 | 约定 + verify D3 |
+| 整块默认折叠（`details` **不带** `open`），只读提示 / 校验失败汇总 / 保存结果都放在折叠区**之外** | 座位拿不到"卡片是否在编辑"（官方 owner props 只有 provider/configured/keyConfigured，且折叠态也无条件 renderSlot），铺开会盖住整张卡片；折叠时藏起来的必须只有模型列表本身，否则"保存点不动"没有解释 | verify F7a / F21b / G5b |
 | 文案硬编码中文、**不注册 locale 命名空间** | 有意少一个失败面 | 约定 |
 | 视觉只用 `--dsw-alias-*` token，不裸写颜色（`var()` 兜底值可以） | 亮暗主题都要成立 | 人工 + 人工复核 |
 
@@ -127,7 +128,7 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
    node tools/mutation-check.mjs
    ```
 
-   必须看到 7 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
+   必须看到 8 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
    "看起来没问题"替代实际输出。
 5. 只有第 3、4 步都过了才有资格说"改好了"。
 6. 提交（第 7 节）。
@@ -182,13 +183,15 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
 - **接线与投递已真机确认**：改完 profile 后，客户端 Inspect 的
   `settings.models.provider-card` occupants 出现 `{ registrant, key: "llm-pi-ai", priority: 0, active: true }`。
   这同时证明了 `inject` 清单（含 `remote.settings`）能解析——否则 `apply` 里的回调根本不会跑。
-- 离线自检 111/111 + 7 项反向验证（M1–M7）全部命中。
+- **真机截图确认过这块 UI 渲染在 `cpa` 卡片里**（读到了 5 个模型、勾选状态与配置一致）。
+- 离线自检 118/118 + 8 项反向验证（M1–M8）全部命中。
 
 还没验证（改这块之前请先补上）：
 
 - **没在真机点过「保存到配置」**：离线侧证明的是 mutate 载荷形状、路径与 revision 传递；真机落盘结果
   要打开 profile 看 `- id: llm-pi-ai` 那一行里是否出现 `reasoningEfforts`（并且没多出别的东西）。
-- **那块 UI 的实际视觉没在真机截图确认过**（间距、亮暗主题对比、与官方模型行的排布关系）。
+- **默认折叠后的新形态还没在真机看过**（实测反馈：铺开的版本太占卡片，所以改成一行摘要 + `<details>`；
+  折叠/展开、选中姿态的填充底色、亮暗主题对比都还需要一眼真机确认）。
 - **只读 profile / `settings/conflict` 的真实触发路径没在真机演练过**（离线用假 ctx 覆盖）。
 - **官方 `dsh-client-ui-settings-models` 升级后**：座位名、owner props（`provider.settingsNs` /
   `settingsPath` / `declared`）与 `remote.settings` 契约都要重新对照第 3 节的不变量。
