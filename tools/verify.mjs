@@ -202,17 +202,31 @@ function walk(node, out = []) {
 }
 
 const treeText = (node) => walk(node).filter((element) => element.type === '#text').map((element) => element.props.text).join(' ')
-const byClass = (node, className) => walk(node).filter((element) => element.props !== undefined && element.props.className === className)
+const byClass = (node, className) =>
+	walk(node).filter(
+		(element) =>
+			element.props !== undefined && typeof element.props.className === 'string' && element.props.className.split(' ').includes(className),
+	)
 const buttons = (node) => walk(node).filter((element) => element.type === 'button')
 const checkboxes = (node) => walk(node).filter((element) => element.type === 'input' && element.props.type === 'checkbox')
 const buttonWithText = (node, text) => buttons(node).find((element) => (element.children ?? []).some((child) => child.type === '#text' && child.props.text === text))
 
 /** 档位顺序（与 lib/client.js 的 LEVELS 一致），用来按名字取某一行的勾选框。 */
 const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+/** 一行里所有勾选项的标签（7 个档位 + 「非推理模型」）。 */
+const choiceLabels = (row) =>
+	byClass(row, 'dsh-rs-choice').map((element) => (element.children ?? []).filter((child) => child.type === '#text').map((child) => child.props.text).join(''))
+/** 按标签取某一行里的勾选框。 */
+const choiceBox = (row, label) => {
+	const index = choiceLabels(row).indexOf(label)
+	return index < 0 ? undefined : checkboxes(row)[index]
+}
 /** 取某一行里某个档位的勾选框。 */
-const levelBox = (row, level) => checkboxes(row)[LEVELS.indexOf(level)]
-/** 取某一行里某个档位的中文提示（勾选框的兄弟文本）。 */
-const levelLabels = (row) => byClass(row, 'dsh-rs-level').map((element) => (element.children ?? []).filter((child) => child.type === '#text').map((child) => child.props.text).join(''))
+const levelBox = (row, level) => choiceBox(row, level)
+/** 「非推理模型」勾选框。 */
+const noneBox = (row) => choiceBox(row, '非推理模型')
+/** 某一行里已勾选的标签。 */
+const checkedLabels = (row) => choiceLabels(row).filter((label) => choiceBox(row, label)?.props.checked === true)
 const modelRows = (tree) => byClass(tree, 'dsh-rs-model')
 /** 保存按钮；找不到时给一个空 props 的替身，让断言干净地失败。 */
 const saveButton = (node) => buttonWithText(node, '保存到配置') ?? { props: {} }
@@ -527,39 +541,40 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	checkSame('E1 七个档位与顺序', t.LEVELS, ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 	checkSame('E2 字段名', t.FIELD, 'reasoningEfforts')
 
-	checkSame('E3 缺省字段 → 继承', t.effortState({ id: 'm' }), { mode: 'inherit', levels: [] })
-	checkSame('E4 false → 非推理', t.effortState({ id: 'm', reasoningEfforts: false }), { mode: 'none', levels: [] })
-	checkSame('E5 null → 声明了但为空（非法，必须修）', t.effortState({ id: 'm', reasoningEfforts: null }), { mode: 'declare', levels: [] })
-	checkSame('E6 空字典 → 声明了但为空', t.effortState({ id: 'm', reasoningEfforts: {} }), { mode: 'declare', levels: [] })
-	checkSame('E7 字典 → 按升序列出勾选', t.effortState({ id: 'm', reasoningEfforts: { max: 'max', off: null, low: 'low' } }), { mode: 'declare', levels: ['off', 'low', 'max'] })
-	checkSame('E8 数组 → 不当作字典', t.effortState({ id: 'm', reasoningEfforts: ['low'] }), { mode: 'declare', levels: [] })
-	checkSame('E9 非对象模型 → 继承', t.effortState(undefined), { mode: 'inherit', levels: [] })
+	checkSame('E3 缺省字段 → 未声明', t.effortState({ id: 'm' }), { disabled: false, levels: [] })
+	checkSame('E4 false → 非推理', t.effortState({ id: 'm', reasoningEfforts: false }), { disabled: true, levels: [] })
+	checkSame('E5 null → 当作未声明（保存时归一成删字段）', t.effortState({ id: 'm', reasoningEfforts: null }), { disabled: false, levels: [] })
+	checkSame('E6 空字典 → 同上', t.effortState({ id: 'm', reasoningEfforts: {} }), { disabled: false, levels: [] })
+	checkSame('E7 字典 → 按升序列出勾选', t.effortState({ id: 'm', reasoningEfforts: { max: 'max', off: null, low: 'low' } }), { disabled: false, levels: ['off', 'low', 'max'] })
+	checkSame('E8 数组 → 不当作字典', t.effortState({ id: 'm', reasoningEfforts: ['low'] }), { disabled: false, levels: [] })
+	checkSame('E9 非对象模型 → 未声明', t.effortState(undefined), { disabled: false, levels: [] })
 
-	check('E10 继承 → undefined（删字段）', t.effortsOf({ mode: 'inherit', levels: ['low'] }) === undefined)
-	check('E11 非推理 → false', t.effortsOf({ mode: 'none', levels: [] }) === false)
-	checkSame('E12 声明 → off 为 null、其余为档位名', t.effortsOf({ mode: 'declare', levels: ['off', 'low', 'max'] }), { off: null, low: 'low', max: 'max' })
-	checkSame('E13 保留手写 wire 拼写', t.effortsOf({ mode: 'declare', levels: ['max'] }, { max: 'ultra' }), { max: 'ultra' })
-	checkSame('E14 非 off 档位的 null 值被档位名修好', t.effortsOf({ mode: 'declare', levels: ['low'] }, { low: null }), { low: 'low' })
-	checkSame('E15 空声明 → 空字典', t.effortsOf({ mode: 'declare', levels: [] }), {})
+	check('E10 全不勾 → undefined（删字段/继承）', t.effortsOf({ disabled: false, levels: [] }) === undefined)
+	check('E11 非推理 → false', t.effortsOf({ disabled: true, levels: [] }) === false)
+	check('E11b 非推理优先（勾选只是休眠）', t.effortsOf({ disabled: true, levels: ['low', 'max'] }) === false)
+	checkSame('E12 声明 → off 为 null、其余为档位名', t.effortsOf({ disabled: false, levels: ['off', 'low', 'max'] }), { off: null, low: 'low', max: 'max' })
+	checkSame('E13 保留手写 wire 拼写', t.effortsOf({ disabled: false, levels: ['max'] }, { max: 'ultra' }), { max: 'ultra' })
+	checkSame('E14 非 off 档位的 null 值被档位名修好', t.effortsOf({ disabled: false, levels: ['low'] }, { low: null }), { low: 'low' })
 
-	check('E16 空声明不合法', typeof t.draftProblem({ mode: 'declare', levels: [] }) === 'string')
-	check('E17 只勾 off 不合法', typeof t.draftProblem({ mode: 'declare', levels: ['off'] }) === 'string')
-	check('E18 off + 思考档位合法', t.draftProblem({ mode: 'declare', levels: ['off', 'low'] }) === undefined)
-	check('E19 继承/非推理无约束', t.draftProblem({ mode: 'inherit', levels: [] }) === undefined && t.draftProblem({ mode: 'none', levels: [] }) === undefined)
+	check('E15 只勾 off 不合法', typeof t.draftProblem({ disabled: false, levels: ['off'] }) === 'string')
+	check('E16 off + 思考档位合法', t.draftProblem({ disabled: false, levels: ['off', 'low'] }) === undefined)
+	check('E17 全不勾合法（= 恢复继承）', t.draftProblem({ disabled: false, levels: [] }) === undefined)
+	check('E18 非推理合法', t.draftProblem({ disabled: true, levels: [] }) === undefined)
 
 	{
 		const models = [clone(flashModel), clone(stepModel)]
-		const next = t.applyDrafts(models, { 'cn:step-5-preview': { mode: 'declare', levels: ['low', 'max'] } })
+		const next = t.applyDrafts(models, { 'cn:step-5-preview': { disabled: false, levels: ['low', 'max'] } })
+		checkSame('E19 改过的行写入字典', next[1].reasoningEfforts, { low: 'low', max: 'max' })
 		check('E20 没改过的行是同一个对象（逐字节不动）', next[0] === models[0])
-		checkSame('E21 改过的行写入字典', next[1].reasoningEfforts, { low: 'low', max: 'max' })
-		check('E22 其它字段保留', next[1].contextWindow === 1000000 && next[1].maxTokens === 64000 && next[1].name === 'cn:step-5-preview')
-		const cleared = t.applyDrafts(models, { 'cn:step-5-preview': { mode: 'inherit', levels: [] } })
-		check('E23 继承 → 字段被删掉', !Object.prototype.hasOwnProperty.call(cleared[1], 'reasoningEfforts'))
-		const none = t.applyDrafts(models, { 'cn:deepseek-v4.1-flash': { mode: 'none', levels: [] } })
-		check('E24 非推理 → false', none[0].reasoningEfforts === false)
+		check('E21 其它字段保留', next[1].contextWindow === 1000000 && next[1].maxTokens === 64000 && next[1].name === 'cn:step-5-preview')
+		const cleared = t.applyDrafts(models, { 'cn:step-5-preview': { disabled: false, levels: [] } })
+		check('E22 全不勾 → 字段被删掉', !Object.prototype.hasOwnProperty.call(cleared[1], 'reasoningEfforts'))
+		const none = t.applyDrafts(models, { 'cn:deepseek-v4.1-flash': { disabled: true, levels: [] } })
+		check('E23 非推理 → false', none[0].reasoningEfforts === false)
 	}
 
-	checkSame('E25 逐模型回报问题', t.collectProblems([clone(stepModel)], { 'cn:step-5-preview': { mode: 'declare', levels: [] } }).length, 1)
+	checkSame('E24 逐模型回报问题（只勾 off）', t.collectProblems([clone(stepModel)], { 'cn:step-5-preview': { disabled: false, levels: ['off'] } }).length, 1)
+	checkSame('E25 全不勾不再是问题', t.collectProblems([clone(stepModel)], { 'cn:step-5-preview': { disabled: false, levels: [] } }), [])
 	checkSame('E26 无草稿无问题', t.collectProblems([clone(stepModel)], {}), [])
 	checkSame('E27 写入 op 的路径', t.modelsOp(['providers', 'cpa'], []), { op: 'set', path: ['providers', 'cpa', 'models'], value: [] })
 	checkSame('E28 getPath 正常', t.getPath({ a: { b: [{ c: 1 }] } }, ['a', 'b', '0', 'c']), 1)
@@ -579,37 +594,35 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 
 	check('F1 describe 被调用一次', workbench.logs.describe === 1, String(workbench.logs.describe))
 	check('F2 订阅了 settings/document-updated', workbench.logs.event === 'settings/document-updated', String(workbench.logs.event))
-	check('F3 渲染出标题', treeText(workbench.tree).includes('思考强度'))
+	check('F3 渲染出字段标签', treeText(workbench.tree).includes('思考强度'))
 	const rows = byClass(workbench.tree, 'dsh-rs-model')
 	checkSame('F4 每个模型一段', rows.length, 2)
-	check('F5 声明的模型列出全部 7 个档位（没声明的 minimal/xhigh 也能加）', checkboxes(rows[0]).length === 7, String(checkboxes(rows[0]).length))
-	checkSame('F5b 勾选框标签按档位升序', levelLabels(rows[0]), ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-	checkSame('F5c 勾选状态来自配置', levelLabels(rows[0]).filter((label, index) => checkboxes(rows[0])[index].props.checked === true), ['off', 'low', 'medium', 'high', 'max'])
-	check('F7 未声明的模型没有勾选框（继承）', checkboxes(rows[1]).length === 0, String(checkboxes(rows[1]).length))
+	check('F5 每个模型列出 7 个档位 + 非推理模型', checkboxes(rows[0]).length === 8, String(checkboxes(rows[0]).length))
+	checkSame('F5b 勾选框标签 = 档位升序 + 非推理模型', choiceLabels(rows[0]), ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', '非推理模型'])
+	checkSame('F5c 勾选状态来自配置', checkedLabels(rows[0]), ['off', 'low', 'medium', 'high', 'max'])
+	checkSame('F6 未声明的模型全都没勾', checkedLabels(rows[1]), [])
 
-	// 可见性：官方 renderSlot 在卡片折叠态也会渲染这块，"只在编辑态出现"由样式表里的 :has 规则
-	// 负责（静态断言见 H8b–H8f）；这里断言组件不再自己套一层需要点开的折叠。
-	check('F7a 组件不再自己包一层折叠（可见性交给 CSS）', byClass(workbench.tree, 'dsh-rs-fold').length === 0 && foldOf(workbench.tree) === undefined)
-	checkSame('F7b 头部给出模型计数', treeText(byClass(workbench.tree, 'dsh-rs-head')[0]), '思考强度 2 个模型 · 1 个已声明')
-	check('F7c 列表与页脚都在根部盒子里', byClass(workbench.tree, 'dsh-rs-list').length === 1 && byClass(workbench.tree, 'dsh-rs-foot').length === 1)
+	// 可见性交给样式表（H8b–H8f），组件不再自己套折叠；行内是「字段标签 + 勾选行」的官方语法。
+	check('F7a 组件不再自己包一层折叠', byClass(workbench.tree, 'dsh-rs-fold').length === 0 && foldOf(workbench.tree) === undefined)
+	checkSame('F7b 每个模型都有「思考强度」字段标签行', byClass(workbench.tree, 'dsh-rs-field').length, 2)
+	check('F7c 已声明的模型有「恢复默认」，未声明的没有', buttonWithText(rows[0], '恢复默认') !== undefined && buttonWithText(rows[1], '恢复默认') === undefined)
+	check('F7d 语义说明常驻（空勾 = 继承）', treeText(workbench.tree).includes('未勾选任何档位 = 不写这个字段'))
 	check('F8 保存按钮初始禁用（没有改动）', saveButton(workbench.tree).props.disabled === true)
 
-	// 把第二个模型切到「自定义」
-	await workbench.click(buttonWithText(rows[1], '自定义'))
-	const rows2 = byClass(workbench.tree, 'dsh-rs-model')
-	check('F9 切到自定义后出现 7 个勾选框', checkboxes(rows2[1]).length === 7, String(checkboxes(rows2[1]).length))
-	check('F10 空声明被拦下并给原因', treeText(workbench.tree).includes('至少勾选一个 off 之外的档位'))
-	check('F11 空声明时保存禁用', saveButton(workbench.tree).props.disabled === true)
+	// 只勾 off 是唯一被配置校验拒绝的勾法
+	await workbench.change(levelBox(modelRows(workbench.tree)[1], 'off'))
+	check('F9 只勾 off 被拦下并给原因', treeText(workbench.tree).includes('至少再勾一个 off 之外的档位'))
+	check('F10 只勾 off 时保存禁用', saveButton(workbench.tree).props.disabled === true)
 
-	// 勾上 low
+	// 再勾 low → 合法
 	await workbench.change(levelBox(modelRows(workbench.tree)[1], 'low'))
-	check('F12 勾选后保存可用', saveButton(workbench.tree).props.disabled === false)
-	check('F13 提示路由默认档位没勾', treeText(workbench.tree).includes('该路由的默认档位是 max'))
+	check('F11 勾上 low 后保存可用', saveButton(workbench.tree).props.disabled === false)
+	check('F12 提示路由默认档位没勾', treeText(workbench.tree).includes('该路由的默认档位是 max'))
 
 	// 再勾上 max，提示消失
 	await workbench.change(levelBox(modelRows(workbench.tree)[1], 'max'))
-	check('F14 勾上默认档位后提示消失', !treeText(workbench.tree).includes('该路由的默认档位是 max'))
-	check('F14b 未保存提示在页脚（紧挨保存按钮）', treeText(byClass(workbench.tree, 'dsh-rs-foot')[0]).includes('有未保存的勾选'))
+	check('F13 勾上默认档位后提示消失', !treeText(workbench.tree).includes('该路由的默认档位是 max'))
+	check('F13b 未保存提示在页脚（紧挨保存按钮）', treeText(byClass(workbench.tree, 'dsh-rs-foot')[0]).includes('有未保存的勾选'))
 
 	await workbench.click(buttonWithText(workbench.tree, '保存到配置'))
 	checkSame('F15 mutate 一次', workbench.logs.mutate.length, 1)
@@ -618,22 +631,23 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	checkSame('F17 载荷是整段数组的 set', call.ops.length === 1 && call.ops[0].op === 'set' && JSON.stringify(call.ops[0].path), JSON.stringify(['providers', 'cpa', 'models']))
 	check('F18 带上 revision', call.revision === 7, String(call.revision))
 	const written = call.ops[0] === undefined ? [] : call.ops[0].value
-	checkSame('F19 只改被勾选的模型', (written[1] ?? {}).reasoningEfforts, { low: 'low', max: 'max' })
+	checkSame('F19 只改被勾选的模型', (written[1] ?? {}).reasoningEfforts, { off: null, low: 'low', max: 'max' })
 	checkSame('F20 没改过的模型逐字节不变', written[0], flashModel)
 	check('F21 写回后提示成功', treeText(workbench.tree).includes('已写入 profile 的 cordis.patch.yml'))
 	check('F23 写回后草稿清空（保存再次禁用）', saveButton(workbench.tree).props.disabled === true)
-	check('F24 写回后勾选仍显示', checkboxes(byClass(workbench.tree, 'dsh-rs-model')[1]).filter((box) => box.props.checked === true).length === 2)
+	checkSame('F24 写回后勾选仍显示', checkedLabels(byClass(workbench.tree, 'dsh-rs-model')[1]), ['off', 'low', 'max'])
 
-	// 继承：把第二个模型退回「继承」
-	await workbench.click(buttonWithText(byClass(workbench.tree, 'dsh-rs-model')[1], '继承'))
+	// 恢复默认：删掉该模型的字段
+	await workbench.click(buttonWithText(byClass(workbench.tree, 'dsh-rs-model')[1], '恢复默认'))
 	await workbench.click(buttonWithText(workbench.tree, '保存到配置'))
 	const second = workbench.logs.mutate[1] ?? { ops: [] }
-	checkSame('F25 继承写回时字段被删掉', second.ops[0] === undefined ? undefined : second.ops[0].value[1], stepModel)
+	checkSame('F25 恢复默认写回时字段被删掉', second.ops[0] === undefined ? undefined : second.ops[0].value[1], stepModel)
 	// 第一次写入返回的 revision 是 8：第二次写入必须用它，而不是继续用旧的 7（乐观并发的前提）。
 	check('F25b 第二次写入用的是上次返回的 revision', second.revision === 8, String(second.revision))
 
-	// 放弃改动
-	await workbench.click(buttonWithText(workbench.tree, '非推理'))
+	// 非推理 + 放弃改动
+	await workbench.change(noneBox(modelRows(workbench.tree)[0]))
+	check('F26a 非推理勾上后档位勾选变灰', levelBox(modelRows(workbench.tree)[0], 'low')?.props.disabled === true)
 	check('F26 有未保存改动时有提示', treeText(workbench.tree).includes('有未保存的勾选'))
 	await workbench.click(buttonWithText(workbench.tree, '放弃改动'))
 	check('F27 放弃后回到已保存状态', !treeText(workbench.tree).includes('有未保存的勾选') && saveButton(workbench.tree).props.disabled === true)
@@ -679,7 +693,6 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	const conflict = await mount({
 		mutate: async () => ({ ok: false, error: { code: 'settings/conflict', message: 'stale revision' } }),
 	})
-	await conflict.click(buttonWithText(modelRows(conflict.tree)[1], '自定义'))
 	await conflict.change(levelBox(modelRows(conflict.tree)[1], 'low'))
 	await conflict.click(buttonWithText(conflict.tree, '保存到配置'))
 	check('G8 冲突时提示重新勾选', treeText(conflict.tree).includes('配置已在别处修改'))
@@ -691,7 +704,6 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	const refused = await mount({
 		mutate: async () => ({ ok: false, error: { code: 'settings/rejected', message: 'nope' } }),
 	})
-	await refused.click(buttonWithText(modelRows(refused.tree)[1], '自定义'))
 	await refused.change(levelBox(modelRows(refused.tree)[1], 'low'))
 	await refused.click(buttonWithText(refused.tree, '保存到配置'))
 	check('G10 被拒绝时给原因', treeText(refused.tree).includes('写入被拒绝：nope'))

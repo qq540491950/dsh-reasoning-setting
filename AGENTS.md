@@ -85,7 +85,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | 一次保存只用**一个** `set` op 承载整段 `models` 数组 | 与官方模型编辑器的 `pathOps` 产物一致；逐字段 op 会在数组下标上撞 `applyPathOp` 的越界检查 | verify F17 |
 | 没被改过的模型必须 `return model`（同一个对象引用，逐字节不动） | 一旦复制/重建，就会把 schema 默认值、甚至 `!!js` 表达式的惰性形状物化进用户配置 | verify E20 / F20 |
 | `reasoningEfforts.off` 写 `null`；其它档位必须写**非空字符串** | `resolveModelReasoning` 的校验：非 off 档位的 `null` / 空串直接 `invalid`；而 `off: null` 是"支持关闭、不发参数"的唯一表达 | verify E12 / M5 |
-| 不许写空字典 `{}`、不写 `null`、不许只勾 `off` | 同上：空字典与 `null` 报 "empty reasoningEfforts"，只有 off 报 "offers no level beyond off" | verify E16 / E17 / F10/F11 |
+| 不许写空字典 `{}`、不写 `null`、不许只勾 `off` | 同上：空字典与 `null` 报 "empty reasoningEfforts"，只有 off 报 "offers no level beyond off"。界面上"全不勾"= 删字段（合法），"只勾 off"= 就地拦下 | verify E15 / F9 / F10 |
 | 读取优先 profile **user** 层，其次 **base**（继承）层；**不要**用 describe 的 `value`（解析后的生效值）当数据源 | `value` 已填好默认值，写回会把默认值物化；官方编辑器同样只用 `user`/`base`（其注释写明了这个坑） | verify G18 |
 | `require` 只能取平台种子模块（本插件实际只用 `react`） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 |
 | 宿主半边零 `import`、导出 `apply` | 它只当接线柱；多引入依赖就多一个失败面 | verify B1/B2 |
@@ -192,7 +192,7 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   - 除新增的两条 `insert:` 行（本插件那条，以及用户自己接的 `dsh-skill-manager`）外，整份文档与备份深度相等
     ——没有把 schema 默认值物化进配置（这正是"数据源只用 user/base"守住的）；
   - 路由默认档位 `max` 在声明集合里，所以不会撞 `UNSUPPORTED_REASONING_EFFORT`。
-- 离线自检 120/120 + 9 项反向验证（M1–M9）全部命中。
+- 离线自检 122/122 + 9 项反向验证（M1–M9）全部命中。
 
 还没验证（改这块之前请先补上）：
 
@@ -200,8 +200,9 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"]))`，
   依据是官方 `SlotOutlet` 把占用者包在 `div[data-slot]` 里、且官方编辑器必然渲染非 checkbox 输入
   （两条都读自官方源码，但没有在真机 DOM 上验过）。要确认的是：**卡片折叠时整块不可见、点「编辑」
-  后出现**，以及选中姿态的填充底色在亮/暗主题下都看得清。若发现"一直不可见"，优先看 `:has()` 是否
-  命中（`@supports` 守卫保证那时应退化为一直可见）。
+  后出现**（出现时是"模型名 + 思考强度"字段标签 + 一排勾选框），以及亮/暗主题下勾选框与「恢复默认」
+  链接都看得清。若发现"一直不可见"，优先看 `:has()` 是否命中（`@supports` 守卫保证那时应退化为
+  一直可见）。
 - **只读 profile / `settings/conflict` 的真实触发路径没在真机演练过**（离线用假 ctx 覆盖）。
 - **官方 `dsh-client-ui-settings-models` 升级后**：座位名、owner props（`provider.settingsNs` /
   `settingsPath` / `declared`）与 `remote.settings` 契约都要重新对照第 3 节的不变量。
