@@ -1,0 +1,21 @@
+{
+  "name": "dsh-reasoning-setting",
+  "version": "0.0.1",
+  "private": true,
+  "description": "DSH Web 客户端插件：在「设置 → 模型」的提供商卡片里为每个模型勾选思考强度（reasoningEfforts），并写回 profile 配置。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}
