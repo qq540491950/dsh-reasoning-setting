@@ -70,6 +70,24 @@ const mutations = [
 		to: ':has(> .dsh-rs-box)',
 		expect: 'H8d',
 	},
+	{
+		name: 'M10 行内容器不再插在「输入类型」正下方（挪到展开体外）',
+		from: 'if (!insertAfter(row.fieldset, holder)) continue;',
+		to: 'if (!insertAfter(row.body, holder)) continue;',
+		expect: 'I4',
+	},
+	{
+		name: 'M11 行内容器不再按模型 id 过滤（DOM 里的草稿行也会被挂上）',
+		from: 'if (!known.has(row.id) || seen.has(row.id)) continue;',
+		to: 'if (seen.has(row.id)) continue;',
+		expect: 'I2',
+	},
+	{
+		name: 'M12 取不到 react-dom 时不再降级（整个插件跟着崩）',
+		from: 'function loadReactDom() {\n\t\t\ttry {\n\t\t\t\treturn require("react-dom");\n\t\t\t} catch (error) {\n\t\t\t\tif (typeof console !== "undefined" && typeof console.warn === "function") {\n\t\t\t\t\tconsole.warn("[dsh-reasoning-setting] 取不到 react-dom，行内挂载关闭（退回卡片面板块）：", error);\n\t\t\t\t}\n\t\t\t\treturn undefined;\n\t\t\t}\n\t\t}',
+		to: 'function loadReactDom() {\n\t\t\treturn require("react-dom");\n\t\t}',
+		expect: 'I0',
+	},
 ]
 
 let bad = 0

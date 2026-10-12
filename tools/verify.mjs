@@ -11,6 +11,7 @@
  *   F. 读写端到端（渲染 → 勾选 → 保存 → 断言 mutate 载荷与写回后的视图）
  *   G. 降级与边界（座位边界不退役、只读、冲突、读取失败、命名空间不匹配、空模型）
  *   H. 文件卫生（LF / 无 BOM / 无 U+FFFD）与可选的 profile 接线校验
+ *   I. 行内挂载（结构锚点、门户容器只挂配置里的模型、撤销幂等、react-dom 缺失时退回整块）
  *
  * 用法：
  *   node tools/verify.mjs
@@ -301,7 +302,7 @@ function makeSeatProps({ settingsNs = 'llm-pi-ai', declared = true, settingsPath
  * 装载浏览器半边并挂载座位组件。
  * @returns 工作台：树、操作日志、点击/等待/销毁。
  */
-async function mount({ describeResults, mutate, seatProps, subscribes = true, onConsole } = {}) {
+async function mount({ describeResults, mutate, seatProps, subscribes = true, reactDomUnavailable = false, onConsole } = {}) {
 	const reactKit = makeReact()
 	const registered = []
 	const logs = { describe: 0, mutate: [], subscribes: 0, unsubscribes: 0, effects: [], console: [] }
@@ -325,6 +326,11 @@ async function mount({ describeResults, mutate, seatProps, subscribes = true, on
 	const definition = registered[0]
 	const clientExports = definition.factory((specifier) => {
 		if (specifier === 'react') return reactKit.react
+		if (specifier === 'react-dom') {
+			// 门户能力：默认给个桩；显式指定不可用时让 require 真的抛错（验证降级路径）。
+			if (reactDomUnavailable) throw new Error('seed react-dom is unavailable')
+			return { createPortal: (children, container, key) => ({ type: '#portal', props: { children, container, key }, children: [] }) }
+		}
 		throw new Error(`unexpected require: ${specifier}`)
 	})
 
@@ -509,9 +515,10 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 	const clientExports = definition.factory((specifier) => {
 		requested.push(specifier)
 		if (specifier === 'react') return reactStub
+		if (specifier === 'react-dom') return { createPortal: () => null }
 		throw new Error(`unexpected require: ${specifier}`)
 	})
-	checkSame('C4 只 require react', requested, ['react'])
+	checkSame('C4 只 require react 与 react-dom', requested, ['react', 'react-dom'])
 	check('C5 导出 apply', typeof clientExports.apply === 'function')
 	check('C6 导出内部钩子（给本自检用）', typeof clientExports.__test === 'object')
 	check('C7 可枚举座位名', typeof clientExports.__test?.SEAT === 'string' && clientExports.__test.SEAT.length > 0)
@@ -777,6 +784,9 @@ check('H8 注释里写清了为什么不遮蔽官方界面', clientSource.includ
 	)
 	check('H8e 有 @supports 守卫（不支持 :has 时保持可见）', css.includes('@supports selector(:has('))
 	check('H8f 基础规则保持 display: flex（老引擎兜底可见）', /\.dsh-rs-box \{[^}]*display: flex/.test(css))
+	check('H8g 行内挂载成功时座位里那块让位（不依赖 :has）', css.includes('.dsh-rs-box[data-inline="1"] { display: none; }'))
+	check('H8h 编辑态判据排除已行内挂载的情况', css.includes('.dsh-rs-box:not([data-inline="1"])'))
+	check('H8i 门户容器 / 行内控件 / 保存条都有样式', css.includes('.dsh-rs-inline-host:empty') && css.includes('.dsh-rs-inline-row') && css.includes('.dsh-rs-bar'))
 }
 
 {
@@ -790,6 +800,197 @@ check('H8 注释里写清了为什么不遮蔽官方界面', clientSource.includ
 		const expected = `file:///${join(root, 'lib', 'index.js').replaceAll('\\', '/')}`
 		check('H10 patch 里的路径指向本仓库', patch.includes(expected), expected)
 	}
+}
+
+//#endregion
+
+//#region I. 行内挂载（结构锚点 + 门户容器 + 回退）
+
+/**
+ * 极简假 DOM：只实现 lib/client.js 的结构化扫描与行内挂载用到的那几个属性/方法。
+ * 不实现选择器字符串 —— client.js 的锚点刻意只用 tagName / children / 兄弟关系。
+ */
+function makeFakeDom() {
+	function makeElement(tag) {
+		return {
+			tagName: String(tag).toUpperCase(),
+			children: [],
+			parentElement: null,
+			attributes: {},
+			className: '',
+			value: '',
+			type: undefined,
+			get nextElementSibling() {
+				const parent = this.parentElement
+				if (parent === null) return null
+				const at = parent.children.indexOf(this)
+				return at < 0 || at + 1 >= parent.children.length ? null : parent.children[at + 1]
+			},
+			get previousElementSibling() {
+				const parent = this.parentElement
+				if (parent === null) return null
+				const at = parent.children.indexOf(this)
+				return at <= 0 ? null : parent.children[at - 1]
+			},
+			appendChild(child) {
+				if (child.parentElement !== null) child.remove()
+				child.parentElement = this
+				this.children.push(child)
+				return child
+			},
+			insertBefore(child, reference) {
+				if (reference === null || reference === undefined) return this.appendChild(child)
+				const at = this.children.indexOf(reference)
+				if (at < 0) return this.appendChild(child)
+				if (child.parentElement !== null) child.remove()
+				child.parentElement = this
+				this.children.splice(at, 0, child)
+				return child
+			},
+			remove() {
+				const parent = this.parentElement
+				if (parent === null) return
+				const at = parent.children.indexOf(this)
+				if (at >= 0) parent.children.splice(at, 1)
+				this.parentElement = null
+			},
+			setAttribute(name, value) {
+				this.attributes[name] = String(value)
+			},
+			hasAttribute(name) {
+				return Object.prototype.hasOwnProperty.call(this.attributes, name)
+			},
+		}
+	}
+	return { document: { createElement: (tag) => makeElement(tag) }, makeElement }
+}
+
+/**
+ * 搭一张「官方 pi-ai 卡片」的假 DOM：行头两个输入框（id / 显示名）+ 展开体里一个 fieldset（输入类型），
+ * 外加一个不属于任何模型行的诱饵 fieldset（它没有行头，必须被忽略）。
+ */
+function fakeCard(dom, ids = ['cn:a', 'cn:b']) {
+	const make = (tag) => dom.createElement(tag)
+	const card = make('li')
+	const head = make('div')
+	card.appendChild(head)
+	const anchor = make('div')
+	anchor.setAttribute('data-slot', 'settings.models.provider-card')
+	card.appendChild(anchor)
+	const box = make('div')
+	box.className = 'dsh-rs-box'
+	anchor.appendChild(box)
+	const rows = []
+	for (const id of ids) {
+		const entry = make('div')
+		const header = make('div')
+		const idInput = make('input')
+		idInput.value = id
+		idInput.type = 'text'
+		const nameInput = make('input')
+		nameInput.value = id.replace(/^cn:/, '')
+		nameInput.type = 'text'
+		header.appendChild(idInput)
+		header.appendChild(nameInput)
+		const body = make('div')
+		const fieldset = make('fieldset')
+		fieldset.appendChild(make('legend'))
+		body.appendChild(fieldset)
+		entry.appendChild(header)
+		entry.appendChild(body)
+		card.appendChild(entry)
+		rows.push({ id, header, body, fieldset })
+	}
+	const decoyWrap = make('div')
+	decoyWrap.appendChild(make('fieldset'))
+	card.appendChild(decoyWrap)
+	return { card, anchor, box, rows }
+}
+
+{
+	// 单独的沙箱：不需要 React 渲染，直接断言结构化扫描与挂/撤的纯逻辑。
+	const dom = makeFakeDom()
+	const built = fakeCard(dom.document)
+	const registered = []
+	const sandbox = { window: { __ModuleLoader__: { load: (definition) => registered.push(definition) } }, console, document: dom.document }
+	sandbox.globalThis = sandbox
+	vm.runInNewContext(clientSource, sandbox, { filename: 'lib/client.js' })
+
+	const requested = []
+	let escaped
+	let clientExports
+	const reactStub = { createElement: () => null, Component: class {}, useState: () => [undefined, () => {}], useEffect: () => {}, useCallback: (fn) => fn, useMemo: (fn) => fn() }
+	try {
+		clientExports = registered[0]?.factory((specifier) => {
+			requested.push(specifier)
+			if (specifier === 'react') return reactStub
+			throw new Error('no react-dom seed') // 故意不提供 react-dom：降级路径不许崩
+		})
+	} catch (error) {
+		escaped = error
+	}
+	check('I0 取不到 react-dom 也不影响模块装载（行内挂载自动关闭）', escaped === undefined && typeof clientExports?.__test === 'object', escaped === undefined ? '' : String(escaped.message))
+
+	if (escaped === undefined) {
+		const t = clientExports.__test
+		checkSame('I1 结构锚点认出两个模型行（诱饵 fieldset 被忽略）', t.modelRowsUnder(built.card).map((row) => row.id), ['cn:a', 'cn:b'])
+		checkSame(
+			'I2 只给配置里已经写着的模型挂容器（未知 id / 重复 id 都跳过）',
+			t.inlinePlanUnder(built.card, [{ id: 'cn:b' }, { id: 'cn:zzz' }, { id: 'cn:b' }]).map((row) => row.id),
+			['cn:b'],
+		)
+		checkSame('I2b 行表不是数组时按空处理', t.inlinePlanUnder(built.card, 'nope').map((row) => row.id), [])
+
+		const before = built.card.children.length
+		const attachment = t.attachInline(built.box, [{ id: 'cn:a' }])
+		check('I3 一个配置过的模型行挂一个门户容器', attachment.rows.length === 1 && attachment.rows[0].id === 'cn:a', `rows=${String(attachment.rows.length)}`)
+		const rowA = built.rows[0]
+		const host = attachment.rows[0]?.node
+		check(
+			'I4 容器插在「输入类型」的 fieldset 正下方',
+			host !== undefined && host.parentElement === rowA.body && rowA.body.children.indexOf(host) === rowA.body.children.indexOf(rowA.fieldset) + 1,
+		)
+		check('I5 保存条插在卡片末尾', attachment.bar !== undefined && attachment.bar.parentElement === built.card && built.card.children[built.card.children.length - 1] === attachment.bar)
+		check('I6 我们的节点都带 OWN 标记（观察者靠它滤掉自己的变更）', host.hasAttribute(t.OWN_ATTR) && attachment.bar.hasAttribute(t.OWN_ATTR))
+		check('I7 诱饵 fieldset（没有行头）上没有容器：卡片只多了保存条一个直接子节点', built.card.children.length === before + 1)
+
+		t.detachInline(attachment)
+		check(
+			'I8 撤销后容器与保存条都消失（卡片回到原样）',
+			built.card.children.length === before && host.parentElement === null && attachment.bar.parentElement === null,
+		)
+		let again
+		try {
+			t.detachInline(attachment)
+			t.detachInline({ rows: [{ node: null }], bar: undefined })
+			t.detachInline(undefined)
+		} catch (error) {
+			again = error
+		}
+		check('I9 撤销可以重复调用、残缺挂载也不抛错', again === undefined, again === undefined ? '' : String(again.message))
+		check('I10 没有可挂的行时原样返回（不插保存条）', t.attachInline(built.box, []) === t.EMPTY_ATTACH && built.card.children.length === before)
+		const bare = fakeCard(dom.document, [])
+		check('I11 认不出模型行结构时返回空挂载（上层退回整块）', t.attachInline(bare.box, [{ id: 'cn:a' }]) === t.EMPTY_ATTACH && bare.card.children.length === 3)
+		checkSame('I12 oursMutation 滤掉自己的变更、放行官方变更', [true, false], [
+			(() => {
+				const holder = dom.makeElement('div')
+				holder.setAttribute(t.OWN_ATTR, 'row')
+				return t.oursMutation({ target: holder, addedNodes: [dom.makeElement('span')] })
+			})(),
+			t.oursMutation({ target: built.card, addedNodes: [dom.makeElement('p')] }),
+		])
+	}
+}
+
+{
+	// 真机路径：react-dom 的种子拿不到时，必须照常渲染座位里的整块（功能不消失），而不是让条目被退役。
+	const result = await mount({ reactDomUnavailable: true }).catch((error) => error)
+	const failed = result instanceof Error
+	check(
+		'I13 react-dom 缺失时退回座位里的整块（不崩、不缺功能）',
+		!failed && treeText(result.tree).includes('思考强度') && modelRows(result.tree).length === 2,
+		failed ? String(result.message) : '',
+	)
 }
 
 //#endregion
