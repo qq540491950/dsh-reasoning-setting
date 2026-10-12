@@ -184,12 +184,18 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   `settings.models.provider-card` occupants 出现 `{ registrant, key: "llm-pi-ai", priority: 0, active: true }`。
   这同时证明了 `inject` 清单（含 `remote.settings`）能解析——否则 `apply` 里的回调根本不会跑。
 - **真机截图确认过这块 UI 渲染在 `cpa` 卡片里**（读到了 5 个模型、勾选状态与配置一致）。
+- **真机落盘已逐字段核对**：用户在 GUI 里勾选并保存后，把当前 profile 与接线前的备份
+  `cordis.patch.yml.bak-1791779255424` 对比：
+  - `providers.cpa` 仍然只有 `apiKeyEnv / api / baseURL / reasoning / models` 五个字段；
+  - 只有 `cn:step-5-preview` 多了 `reasoningEfforts: { off: null, low, medium, high, max }`
+    （写出去的值与界面上勾的完全一致），其余 4 个模型**逐字节未变**；
+  - 除新增的两条 `insert:` 行（本插件那条，以及用户自己接的 `dsh-skill-manager`）外，整份文档与备份深度相等
+    ——没有把 schema 默认值物化进配置（这正是"数据源只用 user/base"守住的）；
+  - 路由默认档位 `max` 在声明集合里，所以不会撞 `UNSUPPORTED_REASONING_EFFORT`。
 - 离线自检 118/118 + 8 项反向验证（M1–M8）全部命中。
 
 还没验证（改这块之前请先补上）：
 
-- **没在真机点过「保存到配置」**：离线侧证明的是 mutate 载荷形状、路径与 revision 传递；真机落盘结果
-  要打开 profile 看 `- id: llm-pi-ai` 那一行里是否出现 `reasoningEfforts`（并且没多出别的东西）。
 - **默认折叠后的新形态还没在真机看过**（实测反馈：铺开的版本太占卡片，所以改成一行摘要 + `<details>`；
   折叠/展开、选中姿态的填充底色、亮暗主题对比都还需要一眼真机确认）。
 - **只读 profile / `settings/conflict` 的真实触发路径没在真机演练过**（离线用假 ctx 覆盖）。
