@@ -21,7 +21,7 @@ DSH 桌面端（Web GUI）的**纯客户端**插件：在「设置 → 模型」
 | `lib/index.js` | 宿主半边：空的 `apply`，仅作为 Loader 的接线柱 | 低，但**不许删**：删了 `dsh-client-modules` 从该条目向上找不到 `package.json`，客户端 bundle 就不再投递 |
 | `package.json` | 包清单契约（第 4 节） | 中——改错就整体不加载 |
 | `tools/verify.mjs` | 离线自检：纯 Node、零依赖，用 `node:vm` 跑**真实的** `lib/client.js`（自带会真跑 hooks、能点击重渲染的 React 替身） | 低；改它必须同步改断言，**不许为了让它变绿而放宽断言** |
-| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 12 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
+| `tools/mutation-check.mjs` | 反向验证：往 `lib/client.js` 注入 16 条违规，确认自检真的会红（护栏本身的自检） | 低；注入点跟着源码走，源码改了注入点找不到会报 `?` |
 | `README.md` | 面向使用者的介绍与使用说明 | 低 |
 | `AGENTS.md` | 本文件（工程约束） | 低 |
 
@@ -106,7 +106,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | `reasoningEfforts.off` 写 `null`；其它档位必须写**非空字符串** | `resolveModelReasoning` 的校验：非 off 档位的 `null` / 空串直接 `invalid`；而 `off: null` 是"支持关闭、不发参数"的唯一表达 | verify E12 / M5 |
 | 不许写空字典 `{}`、不写 `null`、不许只勾 `off` | 同上：空字典与 `null` 报 "empty reasoningEfforts"，只有 off 报 "offers no level beyond off"。界面上"全不勾"= 删字段（合法），"只勾 off"= 就地拦下 | verify E15 / F9 / F10 |
 | 读取优先 profile **user** 层，其次 **base**（继承）层；**不要**用 describe 的 `value`（解析后的生效值）当数据源 | `value` 已填好默认值，写回会把默认值物化；官方编辑器同样只用 `user`/`base`（其注释写明了这个坑） | verify G18 |
-| `require` 只能取平台种子模块（本插件实际取 `react` 与 `react-dom`；后者取不到时必须降级而不是崩） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 / I0 / I13 / M12 |
+| `require` 只能取平台种子模块（本插件实际取 `react` 与 `react-dom`；后者取不到时必须降级而不是崩） | 种子表固化在 shell 里，取别的会 `require` 失败 | verify C4 / I0 / I15 / M12 |
 | 宿主半边零 `import`、导出 `apply` | 它只当接线柱；多引入依赖就多一个失败面 | verify B1/B2 |
 | 只注册 keyed 座位，**不要**加 `priority`、不要注册 `single` 座位 | keyed 座位的唯一性约束在 `(key, priority)`，重复注册直接抛错；`single` 才会遮蔽官方 UI，本插件不需要也没有抢位 | 约定 + verify D3 |
 | 整块**只在卡片编辑态**出现：样式表里默认 `.dsh-rs-box { display: none; }`，再用 `@supports selector(:has(*))` + `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"])) .dsh-rs-box:not([data-inline="1"])` 显示；行内挂载成功时用 `.dsh-rs-box[data-inline="1"]` 独立隐藏（不依赖 `:has`） | 官方那句 renderSlot 在卡片折叠态也会渲染，而座位契约没有"卡片是否在编辑"。判据刻意只用官方 slot 锚点（渲染器说它就是可寻址面）+ "编辑器必然带非 checkbox 输入"，不碰 hashed class。`@supports` 守卫保证不支持 `:has` 时是**一直可见**而不是一直不可见 | verify H8b–H8i / M8 / M9 |
@@ -150,7 +150,7 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
    node tools/mutation-check.mjs
    ```
 
-   必须看到 12 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
+   必须看到 16 条全 `✓` + `反向验证全部命中 ✓`。**禁止**为了让自检变绿而放宽断言，也禁止用
    "看起来没问题"替代实际输出。
 5. 只有第 3、4 步都过了才有资格说"改好了"。
 6. 提交（第 7 节）。
@@ -169,9 +169,11 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
 ## 7. 提交
 
 - 提交信息用中文 Conventional Commits：`feat:` / `fix:` / `chore:` / `docs:`，一行说清改了什么。
-- 本仓库**没有 remote**（自用本地仓库）；不要自己加 remote、不要推送。
+- 远端：`origin` = `https://github.com/qq540491950/dsh-reasoning-setting`（**PUBLIC**，默认分支 `main`）。
+  提交后 `git push origin main` 即可；不要改远端地址、不要 force push。
 - **不要提交敏感信息**：profile 的 `cordis.patch.yml` 里有 API key / MCP token，它**不在本仓库内**，
-  永远不要把它、或它的片段、或任何 token 复制进本仓库。
+  永远不要把它、或它的片段、或任何 token 复制进本仓库。仓库是**公开**的，推上去就抹不掉
+  （撤不回的公开历史）——所以 commit 前必须查 `git status` 与待提交 diff。
 - 提交前确认 `git status` 里没有意外文件。
 
 ## 8. 只碰自己那一行
@@ -188,6 +190,7 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
 ## 9. 本机事实（会漂移，别当契约）
 
 - 仓库路径：`D:\project\dsh-plugins\dsh-reasoning-setting`（profile 里的路径行依赖它）。
+- 远端：`origin` → `https://github.com/qq540491950/dsh-reasoning-setting`（**PUBLIC**，默认分支 `main`）。
 - profile 补丁：`C:\Users\admin\.dsh\profiles\desktop\cordis.patch.yml`；接线前备份
   `cordis.patch.yml.bak-1791779255424`。
 - 只读的 DSH 源码副本（从 `app.asar` 解出）：
@@ -215,22 +218,24 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   - 除新增的两条 `insert:` 行（本插件那条，以及用户自己接的 `dsh-skill-manager`）外，整份文档与备份深度相等
     ——没有把 schema 默认值物化进配置（这正是"数据源只用 user/base"守住的）；
   - 路由默认档位 `max` 在声明集合里，所以不会撞 `UNSUPPORTED_REASONING_EFFORT`。
-- 离线自检 138/138（`--patch` 时 140/140）+ 12 项反向验证（M1–M12）全部命中。
+- 离线自检 145/145（`--patch` 时 147/147）+ 16 项反向验证（M1–M16）全部命中。
 
 还没验证（改这块之前请先补上）：
 
-- **行内挂载（2026-10 新增）还没在真机确认过**：离线用假 DOM 断言了结构锚点、挂/撤、观察者过滤
-  与降级路径（I 组），但真机上要确认的是——**点开「编辑」并展开一个模型行后，`思考强度` 出现在
-  该行 `输入类型` 的正下方**；保存/放弃按钮出现在卡片底部（官方编辑器页脚下方）；勾选 → 保存 →
-  落盘与整块模式一致；折叠所有模型行后块退回卡片顶部整块。若没出现行内形态，看控制台是否有
-  `行内挂载失败` / `取不到 react-dom` 警告（是回退，不是故障）。另需确认门户容器不会干扰官方
-  编辑器（展开/折叠/增删模型行/获取可用模型各点一遍，官方功能不受影响、无 console 报错）。
+- **行内挂载已在真机看到过一次**（用户截图：展开模型行后 `思考强度` 确实出现在 `输入类型` 下方），
+  但那次同时暴露了两个问题，修完后**还没再上真机**：
+  1. 模型行全部折叠时，兜底整块会连同 5 个模型的列表一起铺在卡片顶部（"看起来有两份设置"）——
+     已改成「认得出模型行（`modelHeadersUnder`，折叠也算）就让位」，并且只在真机上验过旧行为；
+  2. 勾选项尺寸/配色与官方不一致（官方 Checkbox 原语是 `gap:6px; 14px/20px` + `16×16` 勾选框 +
+     `accent-color: brand-primary`），这次已**逐值照抄**官方 CSS 并跨满官方两列网格。
+  需要复看的：展开/折叠各一遍都不出现第二份设置；8 个档位整齐 4+4；亮/暗主题下与官方观感一致；
+  门户容器不干扰官方编辑器（增删模型行、获取可用模型、保存官方编辑都不报错）。
 - **"只在编辑态出现"的 CSS 判据还没在真机确认过**：机制是 `@supports selector(:has(*))` +
   `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"])) .dsh-rs-box:not([data-inline="1"])`，
   依据是官方 `SlotOutlet` 把占用者包在 `div[data-slot]` 里（`display: contents`）、且官方编辑器必然
   渲染非 checkbox 输入（两条都读自官方源码，但没有在真机 DOM 上验过）。要确认的是：**卡片折叠时
-  整块不可见、点「编辑」后出现**，以及亮/暗主题下勾选框与「恢复默认」链接都看得清。若发现
-  "一直不可见"，优先看 `:has()` 是否命中（`@supports` 守卫保证那时应退化为一直可见）。
+  整块不可见、点「编辑」后出现**。若发现"一直不可见"，优先看 `:has()` 是否命中
+  （`@supports` 守卫保证那时应退化为一直可见）。
 - **只读 profile / `settings/conflict` 的真实触发路径没在真机演练过**（离线用假 ctx 覆盖）。
 - **官方 `dsh-client-ui-settings-models` 升级后**：座位名、owner props（`provider.settingsNs` /
   `settingsPath` / `declared`）与 `remote.settings` 契约都要重新对照第 3 节的不变量。

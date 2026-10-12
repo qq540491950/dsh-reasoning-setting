@@ -2,7 +2,8 @@
 
 给 DSH 桌面端（Web GUI）的「设置 → 模型」加一个**按模型勾选思考强度**的可视化控件，勾完保存即写进 profile 配置。
 
-> 自用维护的小插件，不发布（`package.json` 里 `"private": true`）。它是**纯新增**：挂在官方声明的
+> 自用维护的小插件（`package.json` 里 `"private": true`，不发布到 npm；源码公开在
+> [GitHub](https://github.com/qq540491950/dsh-reasoning-setting)）。它是**纯新增**：挂在官方声明的
 > keyed 座位 `settings.models.provider-card` 上多渲染一块区域，不遮蔽、不替换官方任何界面；
 > 删掉接线行就完全回到原样。工程约束与硬规则见 [AGENTS.md](AGENTS.md)。
 
