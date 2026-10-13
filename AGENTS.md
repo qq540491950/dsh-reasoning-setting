@@ -114,7 +114,7 @@ ctx.inject(["slots", "remote", "remote.settings"], (scope) => { … })
 | 行内容器**只挂配置里已写着的模型 id**，对不上的行一个都不挂；只追加自己的节点、不许挪官方节点 | 2.5：按 DOM 位置配对会把 A 模型的控件渲染到 B 模型名下；挪官方节点会撞 React 的 reconcile | verify I2 / I3–I5 / M11 |
 | 自己插的节点必须带 `data-dsh-rs-own`，并从 `MutationObserver` 里滤掉 | 不滤就是"插容器 → 观察到自己 → 重挂 → 再观察"的死循环 | verify I6 / I12 |
 | 行内保存入口与卡片底部保存条是**同一个 `save` + 同一份 `saveDisabled` 判据**；有未保存草稿的行必须自带「保存到配置 / 放弃这一行」并把提示贴在该行 | 保存条隔着整个官方编辑器，只有底部一个入口时用户勾完就走、以为"设置了却没生效"（草稿只活在组件 state 里，重开配置页即还原）——真机上就是这么踩的 | verify E31–E38 / I16–I18 / M17–M21 |
-| 路由默认档位（`providers.<route>.reasoning`）只能取**每个模型都声明过**的档位；推荐值 = 共同档位里最高的那个（max 优先，依次向下）；一个共同档位都没有就只给「不设置」；`off` 不进候选；「不设置」写 `unset` 而不是空串 | 它是"请求没带显式档位"时的兜底（`resolveReasoningLevel(model, undefined ?? profile.reasoning)`），取并集会让没声明它的模型每次请求都被拒（`UNSUPPORTED_REASONING_EFFORT`）；写空串会被 schema 拒绝 | verify E39–E47 / F29–F41 / M23–M26 |
+| 路由默认档位（`providers.<route>.reasoning`）下拉的候选 = 该路由**任一**模型声明过的档位（并集）；但**自动推荐/预选**仍然只取**每个模型都声明过**的档位里最高的那个（`routeDefaultLevel`，max 优先依次向下）；`off` 不进候选；「不设置」写 `unset` 而不是空串 | 它是"请求没带显式档位"时的兜底（`resolveReasoningLevel(model, undefined ?? profile.reasoning)`），所以**自动**写出一个没被某模型声明的值会让那个模型每次请求都被拒（`UNSUPPORTED_REASONING_EFFORT`）——预选必须保守。但候选取交集会把 huawei 压成只剩 `high`（三模型交集 `{high}`），用户想给支持 `max` 的 `global:deepseek-v4.1-flash` 选 `max` 都选不到（实测反馈）；显式选择由用户负责，风险写进提示与 `title` | verify E39–E47 / F29–F44 |
 | 推荐值必须**预选**在下拉里，且预选要算进「有改动」；写回后要采纳返回值里的 `reasoning`；明确选过「不设置」要把 `null` 草稿留住 | 预选不算改动 ⇒ 保存按钮灰着，这个值**永远写不进去**（真机上卡住的就是这一步：下拉显示「不设置」、按钮点不动）；写回不采纳返回值 ⇒ 刚存完又被预选顶回来、按钮一直亮着；unset 后丢掉草稿同理 | verify F42–F53 / M27–M29 |
 | `routeDraft` 这个 `useState` 必须和其它 hook 排在一起（所有提前 `return null` 之前） | 挂在守卫分支之后时，命中守卫（命名空间不匹配 / 非手写路由没有模型）就少一个 hook，React 直接抛错、整棵树降级成一行"面板加载失败"——写这个控件时就真踩了一次 | verify G14 / G16 |
 | 文案硬编码中文、**不注册 locale 命名空间** | 有意少一个失败面 | 约定 |
@@ -249,13 +249,15 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
   点行内保存后提示出现在这一行且勾选持久（重开配置页不还原）；点「放弃这一行」只清这一行、其它行不动；
   保存失败（冲突等）时原因也贴在这一行。门户里的子树在 vm 里渲染不出来，离线只静态守住这三条不变量
   （I16–I18）。
-- **「默认档位」下拉还没上真机**：它写路由级 `providers.<route>.reasoning`，下拉里只列"每个模型都
-  勾过的档位"（+「不设置」），并且**路由还没设过时直接预选共同档位里最高的那个**。要复看的：
-  huawei 卡片的下拉里只有 `high`（三个模型的交集）与「不设置」，且打开就是 `high`；**不碰下拉、
-  直接点一次「保存到配置」**，`cordis.patch.yml` 里就应出现 `providers.huawei.reasoning: high`
-  且其余条目逐字节未动；之后切到该路由任一模型时选择器"默认"那一格显示 High；点「放弃改动」能
-  把预选一起丢掉。**注意**：正因为预选算"有改动"，卡片一打开保存按钮就是亮的（有未保存的改动），
-  这是设计如此，不是 bug。
+- **「默认档位」下拉**：它写路由级 `providers.<route>.reasoning`，下拉里列该路由**任一**模型声明过的
+  档位（+「不设置」），并且**路由还没设过时直接预选共同档位里最高的那个**（预选保守，见第 3 节那一行）。
+  要复看的：huawei 卡片的下拉里现在**能选到 `max`**（并集），打开时仍是预选的 `high`（三个模型的共同
+  档位）；**不碰下拉、直接点一次「保存到配置」**，`cordis.patch.yml` 里就应出现
+  `providers.huawei.reasoning: high` 且其余条目逐字节未动；显式选 `max` 再保存则写入 `max`——此时
+  hy3 / step-5-preview 在"请求没带显式档位"时会被适配器拒（选择器切模型会带上显式档位，所以主要
+  影响 `/model` 这类不带档位的切换）。之后切到该路由任一模型时选择器"默认"那一格显示该值；点
+  「放弃改动」能把预选一起丢掉。**注意**：正因为预选算"有改动"，卡片一打开保存按钮就是亮的
+  （有未保存的改动），这是设计如此，不是 bug。
 - **"只在编辑态出现"的 CSS 判据还没在真机确认过**：机制是 `@supports selector(:has(*))` +
   `:is(li, div):has(> [data-slot="settings.models.provider-card"]):has(input:not([type="checkbox"])) .dsh-rs-box:not([data-inline="1"])`，
   依据是官方 `SlotOutlet` 把占用者包在 `div[data-slot]` 里（`display: contents`）、且官方编辑器必然

@@ -716,14 +716,15 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 
 	// 路由默认档位：选一次就写 `providers.<route>.reasoning`；与逐模型勾选共用一次保存。
 	check('F29 渲染出「默认档位」下拉', byClass(workbench.tree, 'dsh-rs-routedefault-select').length === 1, String(byClass(workbench.tree, 'dsh-rs-routedefault-select').length))
-	// 默认夹具里只有第一个模型声明了档位，交集为空 ⇒ 只能选「不设置」，且提示说明为什么。
+	// 默认夹具里只有第一个模型声明了档位，交集为空 ⇒ **自动预选**没有值，但下拉仍然列出并集。
 	{
 		const only = byClass(workbench.tree, 'dsh-rs-routedefault-select')[0]
-		checkSame('F30 没有共同档位时只能选「不设置」', optionValues(only), [''])
+		checkSame('F30 没有共同档位时，下拉仍列出任一模型声明过的档位（并集）+ 不设置', optionValues(only), ['', 'low', 'medium', 'high', 'max'])
 		check('F30b 并说明原因（这条路由的模型还没有共同的档位）', treeText(byClass(workbench.tree, 'dsh-rs-routedefault')[0]).includes('还没有共同的档位'))
+		check('F30c 说明里写明候选是"任一模型声明过"的档位', treeText(byClass(workbench.tree, 'dsh-rs-routedefault')[0]).includes('任一模型声明过'))
 	}
 
-	// 两个模型都声明了 high/max ⇒ 下拉列出这两个 + 不设置，并跟随配置里的路由默认档位。
+	// 两个模型都声明了 high/max ⇒ 下拉列出并集 + 不设置，并跟随配置里的路由默认档位。
 	{
 		const shared = makeDescribeResult({
 			models: [flashModel, { id: 'cn:step-5-preview', name: 'cn:step-5-preview', contextWindow: 1000000, maxTokens: 64000, input: ['text', 'image'], reasoningEfforts: { high: 'high', max: 'max' } }],
@@ -731,7 +732,7 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 		})
 		const bench = await mount({ describeResults: [shared] })
 		const select = byClass(bench.tree, 'dsh-rs-routedefault-select')[0]
-		checkSame('F31 下拉只列出每个模型都勾过的档位 + 不设置', optionValues(select), ['', 'high', 'max'])
+		checkSame('F31 下拉列出该路由任一模型声明过的档位（并集）+ 不设置', optionValues(select), ['', 'low', 'medium', 'high', 'max'])
 		check('F32 下拉默认跟随配置里的路由默认档位', selectValue(select) === 'max')
 		await bench.change(select, 'high')
 		check('F33 只改路由默认档位也能保存（不动任何勾选）', saveButton(bench.tree).props.disabled === false)
@@ -748,8 +749,11 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 		await bench.click(buttonWithText(bench.tree, '保存到配置'))
 		const unsetCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
 		check('F40 「不设置」= unset reasoning（而不是写空串）', unsetCall.ops[1] !== undefined && unsetCall.ops[1].op === 'unset')
-		// 不是共同声明的档位不出现在下拉里：选了它会让没勾它的模型在请求时被拒。
-		check('F41 未共同声明的档位不出现在下拉里', !optionValues(select).includes('medium'))
+		// 只有部分模型声明的档位**也**出现在下拉里：用户可以显式选（huawei 想给支持 max 的
+		// `global:deepseek-v4.1-flash` 选 max，就是被旧的交集规则挡住的）。
+		// 防护意图没有丢：**自动预选**仍然只取共同档位里的最高档（F42/F44），所以"什么都不动
+		// 就保存"绝不会写出会让某个模型在"请求没带显式档位"时被拒的值；显式选择的风险写在提示里。
+		check('F41 只有部分模型声明的档位也出现在下拉里（用户可以显式选）', optionValues(select).includes('medium'))
 	}
 
 	// 推荐值必须**预选**：路由还没设默认档位时，只勾模型档位就保存，默认档位也要跟着落盘。
@@ -761,7 +765,7 @@ check('B3 apply 不抛错（空实现）', host.apply() === undefined)
 		const selectOf = (tree) => byClass(tree, 'dsh-rs-routedefault-select')[0]
 		check('F42 路由没设默认档位时，下拉预选共同档位里最高的那个（max 有就是 max）', selectValue(selectOf(bench.tree)) === 'max', String(selectValue(selectOf(bench.tree))))
 		check('F43 预选也算未保存改动（否则保存按钮是灰的，默认档位永远写不进去）', saveButton(bench.tree).props.disabled === false)
-		checkSame('F44 预选不改候选列表', optionValues(selectOf(bench.tree)), ['', 'high', 'max'])
+		checkSame('F44 候选是并集（含只有部分模型声明的 low / medium）', optionValues(selectOf(bench.tree)), ['', 'low', 'medium', 'high', 'max'])
 		check('F44b 提示写明已预选', treeText(byClass(bench.tree, 'dsh-rs-routedefault')[0]).includes('预选'))
 		await bench.click(buttonWithText(bench.tree, '保存到配置'))
 		const preselectCall = bench.logs.mutate[bench.logs.mutate.length - 1] ?? { ops: [] }
