@@ -1,5 +1,19 @@
 # dsh-reasoning-setting
 
+> ## ⚠️ 已归档（ARCHIVED）
+>
+> 本插件已**停止维护**。官方 DSH 现在已经在「设置 → 模型」的提供商卡片里原生提供思考强度
+> （`reasoningEfforts`）配置，本仓库原本要补的那一格被官方实现取代；两者同时存在只会让同一个
+> 设置出现两份入口，且各自写着同一份 `cordis.patch.yml`。
+>
+> - **不要再接线安装。** 已经装过的，按下面「卸载 / 回滚」一节把 profile 里
+>   `id: dsh-reasoning-setting` 那条 `insert:` 行删掉，然后**重启 DSH**（配置在宿主进程里，
+>   `Ctrl+R` 不够），否则启动时仍会加载本插件、界面上会继续出现第二份「思考强度」。
+> - 仓库转为**只读存档**：历史实现（含 `tools/verify.mjs` 的离线自检、`tools/mutation-check.mjs`
+>   的 30 项反向验证）与 `AGENTS.md` 里的五条硬规则保留下来，供查阅当时的座位 / `remote.settings` /
+>   行内门户挂载是怎么做的。
+> - 存档时间：2026-10-23；最后可用提交见 tag [`archive-last`](https://github.com/qq540491950/dsh-reasoning-setting/releases/tag/archive-last)。
+
 给 DSH 桌面端（Web GUI）的「设置 → 模型」加一个**按模型勾选思考强度**的可视化控件，勾完保存即写进 profile 配置。
 
 > 自用维护的小插件（`package.json` 里 `"private": true`，不发布到 npm；源码公开在
