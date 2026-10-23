@@ -165,6 +165,11 @@ bundle → Host 在 `/plugins` 下发布并写进浏览器 boot graph。
 5. 只有第 3、4 步都过了才有资格说"改好了"。
 6. 提交（第 7 节）。
 
+> **归档后（2026-10-23 起）的唯一判据修正**：profile 里的接线已被拆除，所以 `--patch` 模式会在
+> **H9 / H10**（"patch 里有本插件的 insert 行"、"路径指向本仓库"）按预期报红并 `exit 1`——这两条
+> 断言的就是"接线还在"。**这是预期结果，不是故障**，禁止为了让它们变绿去放宽断言或删断言；
+> 不带 `--patch` 的 `node tools/verify.mjs` 仍必须 `全部通过 ✓`（194/194），这一条照样是硬要求。
+
 ## 6. 出问题时怎么恢复
 
 | 症状 | 原因 | 恢复 |
@@ -194,8 +199,9 @@ profile 是**用户的环境**，不是本仓库的一部分：`C:\Users\admin\.
 裸写 `- id: ...` 会被当成覆盖目标，id 不存在时 Loader 报 `entry not found` 并丢弃该条。
 
 改 profile 前先备份（`Copy-Item` 带时间戳后缀），改完用**真实 YAML 解析器**校验一次
-（`C:\Users\admin\AppData\Local\Temp\dsh-asar-probe\out\dsh\node_modules\yaml`），并确认
-`--patch` 自检仍然全绿。
+（2026-10-23 实测：`C:\Users\admin\AppData\Local\Temp\dsh-asar-probe\…\node_modules\yaml` 已不存在，
+现用临时目录里 `npm install yaml` 装到 `C:\Users\admin\AppData\Local\Temp\dsh-yaml-check\node_modules\yaml`），
+并确认 `--patch` 自检符合第 5 节末尾那条归档后的判据。
 
 ## 9. 本机事实（会漂移，别当契约）
 

@@ -192,6 +192,18 @@ composer 的档位面板里选一次**——勾选写的是"这个模型提供�
 删掉那个 insert 行即可，官方界面立刻回到原样（客户端插件随 Loader 条目一起卸载）。
 接线前的 profile 备份：`cordis.patch.yml.bak-1791779255424`。
 
+具体到本机（已在本仓库归档时执行过一次，2026-10-23，备份 `cordis.patch.yml.bak-1792725790914`）：
+
+1. 先备份 profile（`Copy-Item` + 时间戳后缀）。
+2. 删掉这四行（`- insert:` / `- id: dsh-reasoning-setting` / `name: 'file:///…/lib/index.js'` / 尾随空行），
+   **其它条目一个字节都不要动**——尤其别删隔壁 `- insert: - id: dsh-skill-manager` 那一块。
+3. **重启 DSH**：`reconcileProfilePatches` 没有任何文件监听器，`Ctrl+R` 不够。
+4. 验收：设置页不再出现第二份「思考强度」，控制台不再有 `[dsh-reasoning-setting]` 的输出。
+
+> 删掉接线后 `--patch` 自检会**按预期**在 H9/H10 报红（那两条断言的就是"接线还在"）。这是预期结果，
+> 不是故障，也**不要**为了让它们变绿去放宽断言；不带 `--patch` 的 `node tools/verify.mjs` 仍必须
+> `全部通过 ✓`（194/194）。
+
 ## 自检
 
 ```powershell
